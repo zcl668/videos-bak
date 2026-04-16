@@ -65,6 +65,3 @@ https://playerservices.streamtheworld.com/api/livestream-redirect/YES933_PREM.aa
 
 #EXTINF:-1 tvg-name="澳门fm99.5" tvg-logo="" group-title="粤语电台",澳门fm99.5
 https://fm995.ddns.net/hls1/fm995.m3u8
-
-#EXTINF:-1 tvg-name="亚洲粤语台" tvg-logo="" group-title="粤语电台",亚洲粤语台
-https://lhttp.qtfm.cn/live/15318569/64k.mp3
