@@ -1,70 +1,70 @@
 #EXTM3U
 
-#EXTINF:-1,雷霆881
+#EXTINF:-1 tvg-name="雷霆881" tvg-logo="" group-title="粤语电台",雷霆881
 https://881.touch-u.fun/playlist.m3u8
 
-#EXTINF:-1,叱咤903
+#EXTINF:-1 tvg-name="叱咤903" tvg-logo="" group-title="粤语电台",叱咤903
 https://903.touch-u.fun/playlist.m3u8
 
-#EXTINF:-1,广东珠江经济台
+#EXTINF:-1 tvg-name="广东珠江经济台" tvg-logo="" group-title="粤语电台",广东珠江经济台
 https://lhttp.qtfm.cn/live/1259/64k.mp3?app_id=web
 
-#EXTINF:-1,加州星岛中文粤语台
+#EXTINF:-1 tvg-name="加州星岛中文粤语台" tvg-logo="" group-title="粤语电台",加州星岛中文粤语台
 http://nap.casthost.net:8765/m3u8
 
-#EXTINF:-1,新城知讯台
+#EXTINF:-1 tvg-name="新城知讯台" tvg-logo="" group-title="粤语电台",新城知讯台
 https://1603884249.rsc.cdn77.org/1603884249/tracks-a1/mono.ts.m3u8
 
-#EXTINF:-1,新城采讯台
+#EXTINF:-1 tvg-name="新城采讯台" tvg-logo="" group-title="粤语电台",新城采讯台
 https://1946218710.rsc.cdn77.org/1946218710/tracks-a1/mono.ts.m3u8
 
-#EXTINF:-1,深圳飞扬971
+#EXTINF:-1 tvg-name="深圳飞扬971" tvg-logo="" group-title="音乐广播",深圳飞扬971
 https://lhttp.qtfm.cn/live/1271/64k.mp3?app_id=web
 
-#EXTINF:-1,茂名综合广播
+#EXTINF:-1 tvg-name="茂名综合广播" tvg-logo="" group-title="综合广播",茂名综合广播
 https://lhttp.qtfm.cn/live/20500088/64k.mp3?app_id=web
 
-#EXTINF:-1,清晨音乐
+#EXTINF:-1 tvg-name="清晨音乐" tvg-logo="" group-title="音乐广播",清晨音乐
 https://live.ximalaya.com/radio-first-page-app/live/1011/64.m3u8
 
-#EXTINF:-1,怀旧音乐
+#EXTINF:-1 tvg-name="怀旧音乐" tvg-logo="" group-title="音乐广播",怀旧音乐
 https://live.ximalaya.com/radio-first-page-app/live/966/64.m3u8
 
-#EXTINF:-1,亚洲粤语台
+#EXTINF:-1 tvg-name="亚洲粤语台" tvg-logo="" group-title="粤语电台",亚洲粤语台
 https://live.ximalaya.com/radio-first-page-app/live/999/64.m3u8
 
-#EXTINF:-1,经典
+#EXTINF:-1 tvg-name="经典" tvg-logo="" group-title="音乐广播",经典
 https://live.ximalaya.com/radio-first-page-app/live/2689/64.m3u8
 
-#EXTINF:-1,亚洲热歌
+#EXTINF:-1 tvg-name="亚洲热歌" tvg-logo="" group-title="音乐广播",亚洲热歌
 https://live.ximalaya.com/radio-first-page-app/live/1908/64.m3u8
 
-#EXTINF:-1,年代音乐
+#EXTINF:-1 tvg-name="年代音乐" tvg-logo="" group-title="音乐广播",年代音乐
 https://live.ximalaya.com/radio-first-page-app/live/763/64.m3u8
 
-#EXTINF:-1,FM105.6
+#EXTINF:-1 tvg-name="FM105.6" tvg-logo="" group-title="音乐广播",FM105.6
 https://live.ximalaya.com/radio-first-page-app/live/325/64.m3u8
 
-#EXTINF:-1,音悦台
+#EXTINF:-1 tvg-name="音悦台" tvg-logo="" group-title="音乐广播",音悦台
 https://live.ximalaya.com/radio-first-page-app/live/2684/64.m3u8
 
-#EXTINF:-1,年代965
+#EXTINF:-1 tvg-name="年代965" tvg-logo="" group-title="音乐广播",年代965
 https://live.ximalaya.com/radio-first-page-app/live/2878/64.m3u8
 
-#EXTINF:-1,经典调频1038
+#EXTINF:-1 tvg-name="经典调频1038" tvg-logo="" group-title="音乐广播",经典调频1038
 https://live.ximalaya.com/radio-first-page-app/live/2728/64.m3u8
 
-#EXTINF:-1,化州人民广播电台
+#EXTINF:-1 tvg-name="化州人民广播电台" tvg-logo="" group-title="综合广播",化州人民广播电台
 https://lhttp.qtfm.cn/live/15318689/64k.mp3?app_id=web
 
-#EXTINF:-1,马来西亚988友声有色
+#EXTINF:-1 tvg-name="马来西亚988友声有色" tvg-logo="" group-title="粤语电台",马来西亚988友声有色
 https://22243.live.streamtheworld.com/988_FMAAC.aac
 
-#EXTINF:-1,Yes933
+#EXTINF:-1 tvg-name="Yes933" tvg-logo="" group-title="音乐广播",Yes933
 https://playerservices.streamtheworld.com/api/livestream-redirect/YES933_PREM.aac
 
-#EXTINF:-1,澳门fm99.5
+#EXTINF:-1 tvg-name="澳门fm99.5" tvg-logo="" group-title="粤语电台",澳门fm99.5
 https://fm995.ddns.net/hls1/fm995.m3u8
 
-#EXTINF:-1,亚洲粤语台
+#EXTINF:-1 tvg-name="亚洲粤语台" tvg-logo="" group-title="粤语电台",亚洲粤语台
 https://lhttp.qtfm.cn/live/15318569/64k.mp3
