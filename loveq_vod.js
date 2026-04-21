@@ -19,15 +19,6 @@ const appConfig = {
   defaultPic: 'https://www.loveq.cn/themes/loveq/loveautumn/appimg/qr-code.gif?20180304.gif',
   dexianPic: 'https://www.loveq.cn/themes/loveq/loveautumn/appimg/qr-code.gif?20180304.gif',
   filterCategories: ["盛世乾坤", "一些事一些情", "一些事一些情精华剪辑"],
-  tabs: [
-    {
-      name: '全部节目',
-      ui: 1,
-      ext: {
-        id: '0',
-      },
-    },
-  ],
 }
 
 async function getCategories() {
@@ -38,7 +29,7 @@ async function getCategories() {
     },
   })
   
-  if (data.includes('Just a moment...')) {
+  if (data && data.includes('Just a moment...')) {
     $utils.openSafari(url, UA)
   }
   
@@ -50,7 +41,7 @@ async function getCategories() {
     const href = $(e).attr('href')
     const title = $(e).text().trim()
     
-    const catMatch = href.match(/program-cat(\d+)-p\d+\.html/)
+    const catMatch = href && href.match(/program-cat(\d+)-p\d+\.html/)
     if (catMatch && title && !appConfig.filterCategories.includes(title)) {
       const catId = catMatch[1]
       if (catId !== '0' && !seen.has(catId)) {
@@ -104,7 +95,7 @@ async function getCards(ext) {
     },
   })
   
-  if (data.includes('Just a moment...')) {
+  if (data && data.includes('Just a moment...')) {
     $utils.openSafari(url, UA)
   }
   
@@ -116,7 +107,7 @@ async function getCards(ext) {
     
     if (!title || title.length < 2) return
     
-    const vidMatch = href.match(/program_download-?(\d+)\.html/)
+    const vidMatch = href && href.match(/program_download-?(\d+)\.html/)
     if (vidMatch) {
       const vid = vidMatch[1]
       
@@ -222,7 +213,7 @@ async function getTracks(ext) {
     },
   })
   
-  if (data.includes('Just a moment...')) {
+  if (data && data.includes('Just a moment...')) {
     $utils.openSafari(url, UA)
   }
   
@@ -276,37 +267,65 @@ async function getTracks(ext) {
   
   const desc = pubDate ? `📅 发布日期：${pubDate}\n📝 ${content}` : content
   
-  // 提取音频链接
-  const audioLinks = new Set()
+  // ========== 提取音频链接 ==========
+  const audioUrls = []
+  const seen = new Set()
   
-  // 匹配完整格式的音频链接
-  const pattern = /https?:\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/gi
-  let matches = data.match(pattern) || []
-  matches.forEach(link => audioLinks.add(link))
-  
-  // 匹配协议相对路径
-  const patternRel = /\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/gi
-  matches = data.match(patternRel) || []
-  matches.forEach(link => audioLinks.add(link.startsWith('//') ? 'https:' + link : link))
-  
-  // 从audio/source标签提取
-  $('audio, source').each((_, tag) => {
-    const src = $(tag).attr('src') || ''
-    if (src.includes('dl2.loveq.cn') && /\.mp3\?/.test(src) && src.includes('sign=') && src.includes('timestamp=')) {
-      audioLinks.add(src.startsWith('//') ? 'https:' + src : src)
+  // 方法1：匹配完整格式的音频链接
+  const pattern1 = /https?:\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/gi
+  let matches = data.match(pattern1) || []
+  matches.forEach(link => {
+    if (!seen.has(link)) {
+      seen.add(link)
+      audioUrls.push(link)
     }
   })
   
-  const validLinks = Array.from(audioLinks)
-  
-  // 构建播放URL
-  let playUrl = '暂无音频'
-  if (validLinks.length > 0) {
-    if (validLinks.length > 1) {
-      playUrl = validLinks.map(link => `LoveQ音频$${link}`).join('$$$')
-    } else {
-      playUrl = `LoveQ音频$${validLinks[0]}`
+  // 方法2：匹配协议相对路径
+  const pattern2 = /\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/gi
+  matches = data.match(pattern2) || []
+  matches.forEach(link => {
+    const fullLink = 'https:' + link
+    if (!seen.has(fullLink)) {
+      seen.add(fullLink)
+      audioUrls.push(fullLink)
     }
+  })
+  
+  // 方法3：从audio/source标签提取
+  $('audio, source').each((_, tag) => {
+    let src = $(tag).attr('src') || ''
+    if (src && src.includes('dl2.loveq.cn') && src.includes('.mp3')) {
+      if (src.startsWith('//')) src = 'https:' + src
+      if (!seen.has(src)) {
+        seen.add(src)
+        audioUrls.push(src)
+      }
+    }
+  })
+  
+  // 方法4：从script中提取（有些网站会动态生成）
+  const scriptMatches = data.match(/https?:\/\/[^\s"']+\.mp3\?[^\s"']+/gi) || []
+  scriptMatches.forEach(link => {
+    if (link.includes('dl2.loveq.cn') && !seen.has(link)) {
+      seen.add(link)
+      audioUrls.push(link)
+    }
+  })
+  
+  console.log('找到音频链接:', audioUrls)
+  
+  // 构建播放URL - 修复格式
+  let playUrl = ''
+  if (audioUrls.length > 0) {
+    // 直接返回第一个音频URL，不添加额外前缀
+    playUrl = audioUrls[0]
+    if (audioUrls.length > 1) {
+      // 多个音频用$$$分隔
+      playUrl = audioUrls.join('$$$')
+    }
+  } else {
+    playUrl = ''
   }
   
   // 封面图片
@@ -327,7 +346,7 @@ async function getTracks(ext) {
       vod_name: vodName,
       vod_pic: vodPic,
       vod_content: desc,
-      vod_play_from: '木凡的天空',
+      vod_play_from: 'LoveQ',
       vod_play_url: playUrl,
     }],
   })
@@ -343,12 +362,16 @@ async function searchContent(key, quick, pg = '1') {
   
   let data = null
   for (const url of searchUrls) {
-    const resp = await $fetch.get(url, {
-      headers: { 'User-Agent': UA },
-    })
-    if (resp.data) {
-      data = resp.data
-      break
+    try {
+      const resp = await $fetch.get(url, {
+        headers: { 'User-Agent': UA },
+      })
+      if (resp && resp.data) {
+        data = resp.data
+        break
+      }
+    } catch(e) {
+      console.log('搜索请求失败:', url)
     }
   }
   
@@ -364,10 +387,10 @@ async function searchContent(key, quick, pg = '1') {
     
     if (!title || title.length < 2) return
     
-    const vidMatch = href.match(/program_download-?(\d+)\.html/)
+    const vidMatch = href && href.match(/program_download-?(\d+)\.html/)
     if (vidMatch) {
       const vid = vidMatch[1]
-      if ((key.toLowerCase().includes(title.toLowerCase()) || title.includes(key)) && !seenIds.has(vid)) {
+      if ((key.toLowerCase() === title.toLowerCase() || title.toLowerCase().includes(key.toLowerCase())) && !seenIds.has(vid)) {
         seenIds.add(vid)
         results.push({
           vod_id: vid,
@@ -383,4 +406,27 @@ async function searchContent(key, quick, pg = '1') {
   })
   
   return jsonify({ list: results })
+}
+
+// 播放器处理 - 新增
+async function playerContent(flag, id, vipFlags) {
+  // 直接返回音频URL
+  let audioUrl = id
+  // 如果包含$$$，取第一个
+  if (id && id.includes('$$$')) {
+    audioUrl = id.split('$$$')[0]
+  }
+  
+  const playHeaders = {
+    "User-Agent": UA,
+    "Referer": appConfig.site + "/",
+    "Accept": "audio/webm,audio/ogg,audio/wav,audio/*;q=0.9,*/*;q=0.5",
+  }
+  
+  return {
+    parse: 0,
+    playUrl: "",
+    url: audioUrl,
+    header: playHeaders
+  }
 }
