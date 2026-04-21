@@ -17,16 +17,13 @@ const appConfig = {
   title: 'LoveQ',
   site: 'https://www.loveq.cn',
   defaultPic: 'https://www.loveq.cn/themes/loveq/loveautumn/appimg/qr-code.gif?20180304.gif',
-  dexianPic: 'https://www.loveq.cn/themes/loveq/loveautumn/appimg/qr-code.gif?20180304.gif',
   filterCategories: ["盛世乾坤", "一些事一些情", "一些事一些情精华剪辑"],
 }
 
 async function getCategories() {
   const url = appConfig.site + '/program.html'
   const { data } = await $fetch.get(url, {
-    headers: {
-      'User-Agent': UA,
-    },
+    headers: { 'User-Agent': UA },
   })
   
   if (data && data.includes('Just a moment...')) {
@@ -88,17 +85,13 @@ async function getCards(ext) {
     url += `&month=${encodeURIComponent(filters.month)}`
   }
   
-  console.log('Requesting:', url)
-  
   const { data } = await $fetch.get(url, {
-    headers: {
-      'User-Agent': UA,
-    },
+    headers: { 'User-Agent': UA },
   })
   
   if (data && data.includes('Just a moment...')) {
     $utils.openSafari(url, UA)
-    return jsonify({ list: [], page: 1, pagecount: 1, limit: 30, total: 0 })
+    return jsonify({ list: [] })
   }
   
   const $ = cheerio.load(data)
@@ -113,36 +106,33 @@ async function getCards(ext) {
     if (vidMatch) {
       const vid = vidMatch[1]
       
-      let pic = appConfig.defaultPic
+      let cover = appConfig.defaultPic
       const imgTag = $(e).find('img')
       if (imgTag.length && imgTag.attr('src')) {
         let imgSrc = imgTag.attr('src')
-        if (imgSrc.startsWith('http')) {
-          pic = imgSrc
-        } else {
-          pic = appConfig.site + imgSrc
-        }
+        cover = imgSrc.startsWith('http') ? imgSrc : appConfig.site + imgSrc
       }
       
-      let remark = ''
+      let remarks = ''
       const parent = $(e).closest('li, div[class*="item"], div[class*="entry"]')
       if (parent.length) {
         const dateSpan = parent.find('span[class*="date"], span[class*="time"]')
         if (dateSpan.length) {
-          remark = dateSpan.text().trim()
+          remarks = dateSpan.text().trim()
         }
       }
       
-      cards.push({
+      let obj = {
         vod_id: vid,
         vod_name: title,
-        vod_pic: pic,
-        vod_remarks: remark,
+        vod_pic: cover,
+        vod_remarks: remarks,
         ext: {
           url: href,
           vid: vid,
         },
-      })
+      }
+      cards.push(obj)
     }
   })
   
@@ -156,31 +146,17 @@ async function getCards(ext) {
       const pageText = lastPage.text().trim()
       if (/^\d+$/.test(pageText)) {
         pageCount = parseInt(pageText)
-      } else {
-        pageLinks.each((_, link) => {
-          const linkHref = $(link).attr('href') || ''
-          const pageMatch = linkHref.match(/[?&]page=(\d+)/)
-          if (pageMatch) {
-            const pgNum = parseInt(pageMatch[1])
-            if (pgNum > pageCount) pageCount = pgNum
-          }
-        })
       }
     }
   }
   
-  if (pageCount < page) {
-    pageCount = page
-  }
-  
-  // 年份筛选
+  // 筛选器
   const currentYear = new Date().getFullYear()
   const years = [{ n: '全部年份', v: '' }]
   for (let y = currentYear; y > 2012; y--) {
     years.push({ n: String(y), v: String(y) })
   }
   
-  // 月份筛选
   const months = [{ n: '全部月份', v: '' }]
   for (let m = 1; m <= 12; m++) {
     months.push({ n: `${m}月`, v: String(m) })
@@ -193,18 +169,8 @@ async function getCards(ext) {
     limit: 30,
     total: cards.length,
     filter: [
-      {
-        key: 'year',
-        name: '年份',
-        init: '',
-        value: years,
-      },
-      {
-        key: 'month',
-        name: '月份',
-        init: '',
-        value: months,
-      },
+      { key: 'year', name: '年份', init: '', value: years },
+      { key: 'month', name: '月份', init: '', value: months },
     ],
   })
 }
@@ -213,12 +179,8 @@ async function getTracks(ext) {
   ext = argsify(ext)
   let url = ext.url || `${appConfig.site}/program_download-${ext.vid}.html`
   
-  console.log('获取详情页:', url)
-  
   const { data } = await $fetch.get(url, {
-    headers: {
-      'User-Agent': UA,
-    },
+    headers: { 'User-Agent': UA },
   })
   
   if (data && data.includes('Just a moment...')) {
@@ -226,16 +188,12 @@ async function getTracks(ext) {
     return jsonify({ list: [] })
   }
   
-  // 先打印部分HTML内容，查看实际结构
-  console.log('HTML长度:', data.length)
-  console.log('HTML前500字符:', data.substring(0, 500))
-  
   const $ = cheerio.load(data)
   
-  // 提取原标题
-  let originalTitle = $('title').text().trim()
-  originalTitle = originalTitle.replace(/[-|]\s*LoveQ.*$/, '').trim()
-  if (!originalTitle) originalTitle = `节目${ext.vid}`
+  // 提取标题
+  let title = $('title').text().trim()
+  title = title.replace(/[-|]\s*LoveQ.*$/, '').trim()
+  if (!title) title = `节目${ext.vid}`
   
   // 提取发布日期和内容
   let pubDate = ''
@@ -247,8 +205,6 @@ async function getTracks(ext) {
       const dateMatch = liText.match(/(\d{4}[-\/]\d{2}[-\/]\d{2})/)
       if (dateMatch) {
         pubDate = dateMatch[1]
-      } else {
-        pubDate = liText.replace(/^(发布日期|发布时间)[：:]/, '').trim()
       }
     } else if (liText.includes('节目内容：') || liText.includes('内容简介：')) {
       content = liText.replace(/^(节目内容|内容简介)[：:]/, '').trim()
@@ -259,173 +215,54 @@ async function getTracks(ext) {
     const metaDesc = $('meta[name="description"]').attr('content')
     if (metaDesc) content = metaDesc
   }
+  if (!content) content = '暂无节目简介'
   
-  if (!content) {
-    const contentDiv = $('div[class*="content"], div[class*="intro"], div[class*="desc"]')
-    if (contentDiv.length) {
-      content = contentDiv.text().trim().slice(0, 500)
-    }
-  }
-  
-  if (!content || (content && /^\d{4}[-\/]\d{2}[-\/]\d{2}\s*$/.test(content))) {
-    content = '暂无节目简介'
-  }
-  
-  // 新标题格式
-  let vodName = originalTitle
-  if (pubDate) {
-    const formattedDate = pubDate.replace(/\//g, '-')
-    const contentPreview = content.length > 50 ? content.slice(0, 50) : content
-    vodName = `${formattedDate} - ${contentPreview}`
-  }
-  
-  const desc = pubDate ? `📅 发布日期：${pubDate}\n📝 ${content}` : content
-  
-  // ========== 全面提取音频链接 ==========
+  // 提取音频链接
   let audioUrl = ''
   
-  // 打印所有包含mp3的内容
-  const mp3Matches = data.match(/[^"'\s]*\.mp3[^"'\s]*/gi)
-  if (mp3Matches) {
-    console.log('找到的mp3相关内容:', mp3Matches)
-  }
-  
-  // 打印所有包含dl2.loveq.cn的内容
-  const loveqMatches = data.match(/[^"'\s]*dl2\.loveq\.cn[^"'\s]*/gi)
-  if (loveqMatches) {
-    console.log('找到的dl2.loveq.cn内容:', loveqMatches)
-  }
-  
-  // 方法1：查找audio标签的src
-  $('audio').each((_, tag) => {
-    let src = $(tag).attr('src')
-    if (src) {
-      console.log('audio标签src:', src)
-      if (!audioUrl && src.includes('.mp3')) {
-        if (src.startsWith('//')) src = 'https:' + src
-        audioUrl = src
-      }
-    }
-  })
-  
-  // 方法2：查找source标签
-  if (!audioUrl) {
-    $('source').each((_, tag) => {
-      let src = $(tag).attr('src')
-      if (src) {
-        console.log('source标签src:', src)
-        if (!audioUrl && src.includes('.mp3')) {
-          if (src.startsWith('//')) src = 'https:' + src
-          audioUrl = src
-        }
-      }
-    })
-  }
-  
-  // 方法3：查找video标签
-  if (!audioUrl) {
-    $('video').each((_, tag) => {
-      let src = $(tag).attr('src')
-      if (src) {
-        console.log('video标签src:', src)
-        if (!audioUrl && src.includes('.mp3')) {
-          if (src.startsWith('//')) src = 'https:' + src
-          audioUrl = src
-        }
-      }
-    })
-  }
-  
-  // 方法4：查找iframe
-  if (!audioUrl) {
-    $('iframe').each((_, tag) => {
-      let src = $(tag).attr('src')
-      if (src) {
-        console.log('iframe src:', src)
-      }
-    })
-  }
-  
-  // 方法5：正则匹配各种可能的音频链接
-  if (!audioUrl) {
-    const patterns = [
-      /https?:\/\/[^\s"']+dl2\.loveq\.cn[^\s"']+\.mp3[^\s"']*/gi,
-      /\/\/dl2\.loveq\.cn[^\s"']+\.mp3[^\s"']*/gi,
-      /https?:\/\/[^\s"']+\.mp3\?[^\s"']*/gi,
-      /\/\/[^\s"']+\.mp3\?[^\s"']*/gi,
-      /data-url="([^"]+\.mp3[^"]*)"/gi,
-      /data-src="([^"]+\.mp3[^"]*)"/gi,
-    ]
-    
-    for (const pattern of patterns) {
-      const match = data.match(pattern)
-      if (match) {
-        console.log('正则匹配到:', match[0])
-        let link = match[0]
-        if (link.startsWith('//')) link = 'https:' + link
-        if (link.includes('.mp3')) {
-          audioUrl = link
-          break
-        }
-      }
+  // 匹配mp3链接
+  const mp3Match = data.match(/https?:\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/i)
+  if (mp3Match) {
+    audioUrl = mp3Match[0]
+  } else {
+    const relMatch = data.match(/\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/i)
+    if (relMatch) {
+      audioUrl = 'https:' + relMatch[0]
     }
   }
   
-  // 方法6：查找script中的变量
+  // 如果还是没找到，尝试从audio标签提取
   if (!audioUrl) {
-    const scriptVars = data.match(/var\s+[a-zA-Z_][a-zA-Z0-9_]*\s*=\s*['"]([^'"]+\.mp3[^'"]*)['"]/gi)
-    if (scriptVars) {
-      console.log('script变量:', scriptVars)
-      for (const sv of scriptVars) {
-        const urlMatch = sv.match(/['"]([^'"]+\.mp3[^'"]*)['"]/)
-        if (urlMatch && urlMatch[1]) {
-          let link = urlMatch[1]
-          if (link.startsWith('//')) link = 'https:' + link
-          audioUrl = link
-          break
-        }
-      }
-    }
-  }
-  
-  // 方法7：查找embed标签
-  if (!audioUrl) {
-    $('embed').each((_, tag) => {
-      let src = $(tag).attr('src')
+    $('audio, source').each((_, tag) => {
+      let src = $(tag).attr('src') || ''
       if (src && src.includes('.mp3')) {
         if (src.startsWith('//')) src = 'https:' + src
         audioUrl = src
+        return false
       }
     })
   }
   
-  console.log('最终获取到的音频地址:', audioUrl)
-  
-  // 封面图片
-  let vodPic = appConfig.defaultPic
-  if (originalTitle.includes('得闲小叙') || originalTitle.includes('得闲')) {
-    vodPic = appConfig.dexianPic
-  } else {
-    const imgTag = $('img[class*="cover"], img[class*="poster"], img[class*="pic"], .pdl1 img')
-    if (imgTag.length && imgTag.attr('src')) {
-      let imgSrc = imgTag.attr('src')
-      vodPic = imgSrc.startsWith('http') ? imgSrc : appConfig.site + imgSrc
-    }
-  }
-  
   if (!audioUrl) {
-    console.log('未找到音频链接，请查看上方日志')
     $utils.toastError('未找到音频链接')
     return jsonify({ list: [] })
   }
   
-  // 返回播放地址
+  // 封面图片
+  let pic = appConfig.defaultPic
+  const imgTag = $('img[class*="cover"], img[class*="poster"], .pdl1 img')
+  if (imgTag.length && imgTag.attr('src')) {
+    let imgSrc = imgTag.attr('src')
+    pic = imgSrc.startsWith('http') ? imgSrc : appConfig.site + imgSrc
+  }
+  
+  // 按照模板格式返回
   return jsonify({
     list: [{
       vod_id: ext.vid,
-      vod_name: vodName,
-      vod_pic: vodPic,
-      vod_content: desc,
+      vod_name: title,
+      vod_pic: pic,
+      vod_content: content,
       vod_play_url: audioUrl,
     }],
   })
@@ -442,16 +279,12 @@ async function searchContent(key, quick, pg = '1') {
   let data = null
   for (const url of searchUrls) {
     try {
-      const resp = await $fetch.get(url, {
-        headers: { 'User-Agent': UA },
-      })
+      const resp = await $fetch.get(url, { headers: { 'User-Agent': UA } })
       if (resp && resp.data) {
         data = resp.data
         break
       }
-    } catch(e) {
-      console.log('搜索请求失败:', url)
-    }
+    } catch(e) {}
   }
   
   if (!data) return jsonify({ list: [] })
