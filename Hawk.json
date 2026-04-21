@@ -113,7 +113,7 @@
     "version": "0.0.5",
     "update_time": "2025-07-11T10:45:00Z",
     "adult": true,
-    "endpoint": "https://cdn.jsdelivr.net/gh/fangkuia/XPTV@refs/heads/main/VOD/XPAV.json"
+    "endpoint": "https://raw.githubusercontent.com/zcl668/videos-bak/main/Hawk_vod_av.json"
   },
   {
     "id": "vod5",
