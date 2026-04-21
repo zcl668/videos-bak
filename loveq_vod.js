@@ -226,6 +226,10 @@ async function getTracks(ext) {
     return jsonify({ list: [] })
   }
   
+  // 先打印部分HTML内容，查看实际结构
+  console.log('HTML长度:', data.length)
+  console.log('HTML前500字符:', data.substring(0, 500))
+  
   const $ = cheerio.load(data)
   
   // 提取原标题
@@ -277,57 +281,132 @@ async function getTracks(ext) {
   
   const desc = pubDate ? `📅 发布日期：${pubDate}\n📝 ${content}` : content
   
-  // ========== 提取音频链接 ==========
+  // ========== 全面提取音频链接 ==========
   let audioUrl = ''
   
-  // 方法1：匹配完整格式
-  const mp3Match = data.match(/https?:\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/i)
-  if (mp3Match) {
-    audioUrl = mp3Match[0]
-    console.log('方法1找到音频:', audioUrl)
+  // 打印所有包含mp3的内容
+  const mp3Matches = data.match(/[^"'\s]*\.mp3[^"'\s]*/gi)
+  if (mp3Matches) {
+    console.log('找到的mp3相关内容:', mp3Matches)
   }
   
-  // 方法2：匹配相对路径
-  if (!audioUrl) {
-    const relMatch = data.match(/\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/i)
-    if (relMatch) {
-      audioUrl = 'https:' + relMatch[0]
-      console.log('方法2找到音频:', audioUrl)
-    }
+  // 打印所有包含dl2.loveq.cn的内容
+  const loveqMatches = data.match(/[^"'\s]*dl2\.loveq\.cn[^"'\s]*/gi)
+  if (loveqMatches) {
+    console.log('找到的dl2.loveq.cn内容:', loveqMatches)
   }
   
-  // 方法3：从audio标签提取
-  if (!audioUrl) {
-    $('audio, source').each((_, tag) => {
-      let src = $(tag).attr('src') || ''
-      if (src && src.includes('dl2.loveq.cn') && src.includes('.mp3')) {
+  // 方法1：查找audio标签的src
+  $('audio').each((_, tag) => {
+    let src = $(tag).attr('src')
+    if (src) {
+      console.log('audio标签src:', src)
+      if (!audioUrl && src.includes('.mp3')) {
         if (src.startsWith('//')) src = 'https:' + src
-        if (!audioUrl) audioUrl = src
+        audioUrl = src
+      }
+    }
+  })
+  
+  // 方法2：查找source标签
+  if (!audioUrl) {
+    $('source').each((_, tag) => {
+      let src = $(tag).attr('src')
+      if (src) {
+        console.log('source标签src:', src)
+        if (!audioUrl && src.includes('.mp3')) {
+          if (src.startsWith('//')) src = 'https:' + src
+          audioUrl = src
+        }
       }
     })
-    if (audioUrl) console.log('方法3找到音频:', audioUrl)
   }
   
-  // 方法4：从script中提取
+  // 方法3：查找video标签
   if (!audioUrl) {
-    const scriptMatch = data.match(/https?:\/\/[^\s"']+\.mp3\?[^\s"']+/gi)
-    if (scriptMatch) {
-      for (const link of scriptMatch) {
-        if (link.includes('dl2.loveq.cn')) {
+    $('video').each((_, tag) => {
+      let src = $(tag).attr('src')
+      if (src) {
+        console.log('video标签src:', src)
+        if (!audioUrl && src.includes('.mp3')) {
+          if (src.startsWith('//')) src = 'https:' + src
+          audioUrl = src
+        }
+      }
+    })
+  }
+  
+  // 方法4：查找iframe
+  if (!audioUrl) {
+    $('iframe').each((_, tag) => {
+      let src = $(tag).attr('src')
+      if (src) {
+        console.log('iframe src:', src)
+      }
+    })
+  }
+  
+  // 方法5：正则匹配各种可能的音频链接
+  if (!audioUrl) {
+    const patterns = [
+      /https?:\/\/[^\s"']+dl2\.loveq\.cn[^\s"']+\.mp3[^\s"']*/gi,
+      /\/\/dl2\.loveq\.cn[^\s"']+\.mp3[^\s"']*/gi,
+      /https?:\/\/[^\s"']+\.mp3\?[^\s"']*/gi,
+      /\/\/[^\s"']+\.mp3\?[^\s"']*/gi,
+      /data-url="([^"]+\.mp3[^"]*)"/gi,
+      /data-src="([^"]+\.mp3[^"]*)"/gi,
+    ]
+    
+    for (const pattern of patterns) {
+      const match = data.match(pattern)
+      if (match) {
+        console.log('正则匹配到:', match[0])
+        let link = match[0]
+        if (link.startsWith('//')) link = 'https:' + link
+        if (link.includes('.mp3')) {
           audioUrl = link
-          console.log('方法4找到音频:', audioUrl)
           break
         }
       }
     }
   }
   
+  // 方法6：查找script中的变量
+  if (!audioUrl) {
+    const scriptVars = data.match(/var\s+[a-zA-Z_][a-zA-Z0-9_]*\s*=\s*['"]([^'"]+\.mp3[^'"]*)['"]/gi)
+    if (scriptVars) {
+      console.log('script变量:', scriptVars)
+      for (const sv of scriptVars) {
+        const urlMatch = sv.match(/['"]([^'"]+\.mp3[^'"]*)['"]/)
+        if (urlMatch && urlMatch[1]) {
+          let link = urlMatch[1]
+          if (link.startsWith('//')) link = 'https:' + link
+          audioUrl = link
+          break
+        }
+      }
+    }
+  }
+  
+  // 方法7：查找embed标签
+  if (!audioUrl) {
+    $('embed').each((_, tag) => {
+      let src = $(tag).attr('src')
+      if (src && src.includes('.mp3')) {
+        if (src.startsWith('//')) src = 'https:' + src
+        audioUrl = src
+      }
+    })
+  }
+  
+  console.log('最终获取到的音频地址:', audioUrl)
+  
   // 封面图片
   let vodPic = appConfig.defaultPic
   if (originalTitle.includes('得闲小叙') || originalTitle.includes('得闲')) {
     vodPic = appConfig.dexianPic
   } else {
-    const imgTag = $('img[class*="cover"], img[class*="poster"], img[class*="pic"]')
+    const imgTag = $('img[class*="cover"], img[class*="poster"], img[class*="pic"], .pdl1 img')
     if (imgTag.length && imgTag.attr('src')) {
       let imgSrc = imgTag.attr('src')
       vodPic = imgSrc.startsWith('http') ? imgSrc : appConfig.site + imgSrc
@@ -335,7 +414,7 @@ async function getTracks(ext) {
   }
   
   if (!audioUrl) {
-    console.log('未找到音频链接')
+    console.log('未找到音频链接，请查看上方日志')
     $utils.toastError('未找到音频链接')
     return jsonify({ list: [] })
   }
