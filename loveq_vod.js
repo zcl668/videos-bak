@@ -7,7 +7,7 @@ async function getLocalInfo() {
   return jsonify(appConfig)
 }
 
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko) Version/18.2 Mobile/15E148 Safari/604.1'
 const cheerio = createCheerio()
 
 let $config = argsify($config_str)
@@ -31,6 +31,7 @@ async function getCategories() {
   
   if (data && data.includes('Just a moment...')) {
     $utils.openSafari(url, UA)
+    return []
   }
   
   const $ = cheerio.load(data)
@@ -97,6 +98,7 @@ async function getCards(ext) {
   
   if (data && data.includes('Just a moment...')) {
     $utils.openSafari(url, UA)
+    return jsonify({ list: [], page: 1, pagecount: 1, limit: 30, total: 0 })
   }
   
   const $ = cheerio.load(data)
@@ -167,10 +169,14 @@ async function getCards(ext) {
     }
   }
   
+  if (pageCount < page) {
+    pageCount = page
+  }
+  
   // 年份筛选
   const currentYear = new Date().getFullYear()
   const years = [{ n: '全部年份', v: '' }]
-  for (let y = currentYear; y > 2002; y--) {
+  for (let y = currentYear; y > 2012; y--) {
     years.push({ n: String(y), v: String(y) })
   }
   
@@ -207,6 +213,8 @@ async function getTracks(ext) {
   ext = argsify(ext)
   let url = ext.url || `${appConfig.site}/program_download-${ext.vid}.html`
   
+  console.log('获取详情页:', url)
+  
   const { data } = await $fetch.get(url, {
     headers: {
       'User-Agent': UA,
@@ -215,15 +223,17 @@ async function getTracks(ext) {
   
   if (data && data.includes('Just a moment...')) {
     $utils.openSafari(url, UA)
+    return jsonify({ list: [] })
   }
   
   const $ = cheerio.load(data)
   
-  // 提取标题和内容
+  // 提取原标题
   let originalTitle = $('title').text().trim()
   originalTitle = originalTitle.replace(/[-|]\s*LoveQ.*$/, '').trim()
   if (!originalTitle) originalTitle = `节目${ext.vid}`
   
+  // 提取发布日期和内容
   let pubDate = ''
   let content = ''
   
@@ -268,64 +278,48 @@ async function getTracks(ext) {
   const desc = pubDate ? `📅 发布日期：${pubDate}\n📝 ${content}` : content
   
   // ========== 提取音频链接 ==========
-  const audioUrls = []
-  const seen = new Set()
+  let audioUrl = ''
   
-  // 方法1：匹配完整格式的音频链接
-  const pattern1 = /https?:\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/gi
-  let matches = data.match(pattern1) || []
-  matches.forEach(link => {
-    if (!seen.has(link)) {
-      seen.add(link)
-      audioUrls.push(link)
+  // 方法1：匹配完整格式
+  const mp3Match = data.match(/https?:\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/i)
+  if (mp3Match) {
+    audioUrl = mp3Match[0]
+    console.log('方法1找到音频:', audioUrl)
+  }
+  
+  // 方法2：匹配相对路径
+  if (!audioUrl) {
+    const relMatch = data.match(/\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/i)
+    if (relMatch) {
+      audioUrl = 'https:' + relMatch[0]
+      console.log('方法2找到音频:', audioUrl)
     }
-  })
+  }
   
-  // 方法2：匹配协议相对路径
-  const pattern2 = /\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/gi
-  matches = data.match(pattern2) || []
-  matches.forEach(link => {
-    const fullLink = 'https:' + link
-    if (!seen.has(fullLink)) {
-      seen.add(fullLink)
-      audioUrls.push(fullLink)
-    }
-  })
+  // 方法3：从audio标签提取
+  if (!audioUrl) {
+    $('audio, source').each((_, tag) => {
+      let src = $(tag).attr('src') || ''
+      if (src && src.includes('dl2.loveq.cn') && src.includes('.mp3')) {
+        if (src.startsWith('//')) src = 'https:' + src
+        if (!audioUrl) audioUrl = src
+      }
+    })
+    if (audioUrl) console.log('方法3找到音频:', audioUrl)
+  }
   
-  // 方法3：从audio/source标签提取
-  $('audio, source').each((_, tag) => {
-    let src = $(tag).attr('src') || ''
-    if (src && src.includes('dl2.loveq.cn') && src.includes('.mp3')) {
-      if (src.startsWith('//')) src = 'https:' + src
-      if (!seen.has(src)) {
-        seen.add(src)
-        audioUrls.push(src)
+  // 方法4：从script中提取
+  if (!audioUrl) {
+    const scriptMatch = data.match(/https?:\/\/[^\s"']+\.mp3\?[^\s"']+/gi)
+    if (scriptMatch) {
+      for (const link of scriptMatch) {
+        if (link.includes('dl2.loveq.cn')) {
+          audioUrl = link
+          console.log('方法4找到音频:', audioUrl)
+          break
+        }
       }
     }
-  })
-  
-  // 方法4：从script中提取（有些网站会动态生成）
-  const scriptMatches = data.match(/https?:\/\/[^\s"']+\.mp3\?[^\s"']+/gi) || []
-  scriptMatches.forEach(link => {
-    if (link.includes('dl2.loveq.cn') && !seen.has(link)) {
-      seen.add(link)
-      audioUrls.push(link)
-    }
-  })
-  
-  console.log('找到音频链接:', audioUrls)
-  
-  // 构建播放URL - 修复格式
-  let playUrl = ''
-  if (audioUrls.length > 0) {
-    // 直接返回第一个音频URL，不添加额外前缀
-    playUrl = audioUrls[0]
-    if (audioUrls.length > 1) {
-      // 多个音频用$$$分隔
-      playUrl = audioUrls.join('$$$')
-    }
-  } else {
-    playUrl = ''
   }
   
   // 封面图片
@@ -340,14 +334,20 @@ async function getTracks(ext) {
     }
   }
   
+  if (!audioUrl) {
+    console.log('未找到音频链接')
+    $utils.toastError('未找到音频链接')
+    return jsonify({ list: [] })
+  }
+  
+  // 返回播放地址
   return jsonify({
     list: [{
       vod_id: ext.vid,
       vod_name: vodName,
       vod_pic: vodPic,
       vod_content: desc,
-      vod_play_from: 'LoveQ',
-      vod_play_url: playUrl,
+      vod_play_url: audioUrl,
     }],
   })
 }
@@ -390,7 +390,7 @@ async function searchContent(key, quick, pg = '1') {
     const vidMatch = href && href.match(/program_download-?(\d+)\.html/)
     if (vidMatch) {
       const vid = vidMatch[1]
-      if ((key.toLowerCase() === title.toLowerCase() || title.toLowerCase().includes(key.toLowerCase())) && !seenIds.has(vid)) {
+      if (title.toLowerCase().includes(key.toLowerCase()) && !seenIds.has(vid)) {
         seenIds.add(vid)
         results.push({
           vod_id: vid,
@@ -406,27 +406,4 @@ async function searchContent(key, quick, pg = '1') {
   })
   
   return jsonify({ list: results })
-}
-
-// 播放器处理 - 新增
-async function playerContent(flag, id, vipFlags) {
-  // 直接返回音频URL
-  let audioUrl = id
-  // 如果包含$$$，取第一个
-  if (id && id.includes('$$$')) {
-    audioUrl = id.split('$$$')[0]
-  }
-  
-  const playHeaders = {
-    "User-Agent": UA,
-    "Referer": appConfig.site + "/",
-    "Accept": "audio/webm,audio/ogg,audio/wav,audio/*;q=0.9,*/*;q=0.5",
-  }
-  
-  return {
-    parse: 0,
-    playUrl: "",
-    url: audioUrl,
-    header: playHeaders
-  }
 }
