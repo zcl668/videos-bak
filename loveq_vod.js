@@ -7,7 +7,7 @@ async function getLocalInfo() {
   return jsonify(appConfig)
 }
 
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko) Version/18.2 Mobile/15E148 Safari/604.1'
 const cheerio = createCheerio()
 
 let $config = argsify($config_str)
@@ -16,96 +16,25 @@ const appConfig = {
   ver: 1,
   title: 'LoveQ',
   site: 'https://www.loveq.cn',
-  defaultPic: 'https://raw.githubusercontent.com/zcl668/videos-bak/main/loveq2026.jpg',
-  dexianPic: 'https://raw.githubusercontent.com/zcl668/videos-bak/main/loveq2026.jpg',
+  defaultPic: 'https://www.loveq.cn/themes/loveq/loveautumn/appimg/qr-code.gif?20180304.gif',
+  dexianPic: 'https://www.loveq.cn/themes/loveq/loveautumn/appimg/qr-code.gif?20180304.gif',
   filterCategories: ["盛世乾坤", "一些事一些情", "一些事一些情精华剪辑"],
 }
 
-// ========== 通用请求方法 ==========
-async function request(url, params = null) {
-  let fullUrl = url
-  if (params) {
-    const queryString = Object.keys(params)
-      .filter(k => params[k])
-      .map(k => `${encodeURIComponent(k)}=${encodeURIComponent(params[k])}`)
-      .join('&')
-    if (queryString) {
-      fullUrl += (url.includes('?') ? '&' : '?') + queryString
-    }
-  }
-  
-  console.log('Requesting:', fullUrl)
-  
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('Timeout')), 15000)
-    
-    // Quantumult X / Surge
-    if (typeof $task !== 'undefined') {
-      $task.fetch({
-        url: fullUrl,
-        method: 'GET',
-        headers: {
-          'User-Agent': UA,
-          'Referer': appConfig.site + '/',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-          'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-          'Connection': 'keep-alive'
-        },
-      }, (error, response, body) => {
-        clearTimeout(timeout)
-        if (error) reject(error)
-        else resolve({ data: body })
-      })
-    }
-    // Loon
-    else if (typeof $httpClient !== 'undefined') {
-      $httpClient.get({
-        url: fullUrl,
-        headers: {
-          'User-Agent': UA,
-          'Referer': appConfig.site + '/',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-          'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-          'Connection': 'keep-alive'
-        },
-      }, (error, response, body) => {
-        clearTimeout(timeout)
-        if (error) reject(error)
-        else resolve({ data: body })
-      })
-    }
-    // 其他环境
-    else if (typeof fetch !== 'undefined') {
-      fetch(fullUrl, {
-        headers: {
-          'User-Agent': UA,
-          'Referer': appConfig.site + '/',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-          'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
-        },
-      })
-        .then(res => res.text())
-        .then(data => {
-          clearTimeout(timeout)
-          resolve({ data })
-        })
-        .catch(reject)
-    }
-    else {
-      clearTimeout(timeout)
-      reject(new Error('No HTTP client'))
-    }
+async function getCategories() {
+  const url = appConfig.site + '/program.html'
+  const { data } = await $fetch.get(url, {
+    headers: {
+      'User-Agent': UA,
+    },
   })
-}
-
-// ========== 首页分类 ==========
-async function getConfig() {
-  const html = await request(appConfig.site + '/program.html')
-  if (!html || !html.data) {
-    return jsonify({ class: [] })
+  
+  if (data && data.includes('Just a moment...')) {
+    $utils.openSafari(url, UA)
+    return []
   }
   
-  const $ = cheerio.load(html.data)
+  const $ = cheerio.load(data)
   const categories = []
   const seen = new Set()
   
@@ -127,66 +56,52 @@ async function getConfig() {
   })
   
   categories.sort((a, b) => parseInt(a.type_id) - parseInt(b.type_id))
+  return categories
+}
+
+async function getConfig() {
+  let config = { ...appConfig }
+  const categories = await getCategories()
   
-  // 添加筛选器
-  const currentYear = new Date().getFullYear()
-  const years = [{ n: '全部年份', v: '' }]
-  for (let y = currentYear; y > 2002; y--) {
-    years.push({ n: String(y), v: String(y) })
-  }
-  
-  const months = [{ n: '全部月份', v: '' }]
-  for (let m = 1; m <= 12; m++) {
-    months.push({ n: `${m}月`, v: String(m) })
-  }
-  
-  const tabs = categories.map(cat => ({
+  config.tabs = categories.map(cat => ({
     name: cat.type_name,
     ui: 1,
     ext: {
       id: cat.type_id,
-    }
+    },
   }))
   
-  return jsonify({
-    ver: 1,
-    title: appConfig.title,
-    site: appConfig.site,
-    defaultPic: appConfig.defaultPic,
-    dexianPic: appConfig.dexianPic,
-    tabs: tabs,
-    filters: {
-      year: { name: '年份', values: years },
-      month: { name: '月份', values: months }
-    }
-  })
+  return jsonify(config)
 }
 
-// ========== 分类内容 ==========
 async function getCards(ext) {
   ext = argsify(ext)
+  let cards = []
   let { page = 1, id, filters = {} } = ext
   
-  // 构建参数
-  const params = {
-    cat_id: id,
-    page: page
-  }
+  let url = appConfig.site + `/program.html?cat_id=${id}&page=${page}`
   
   if (filters.year && filters.year !== '') {
-    params.year = filters.year
+    url += `&year=${encodeURIComponent(filters.year)}`
   }
   if (filters.month && filters.month !== '') {
-    params.month = filters.month
+    url += `&month=${encodeURIComponent(filters.month)}`
   }
   
-  const html = await request(appConfig.site + '/program.html', params)
-  if (!html || !html.data) {
-    return jsonify({ list: [], page: parseInt(page), pagecount: 0, limit: 30, total: 0 })
+  console.log('Requesting:', url)
+  
+  const { data } = await $fetch.get(url, {
+    headers: {
+      'User-Agent': UA,
+    },
+  })
+  
+  if (data && data.includes('Just a moment...')) {
+    $utils.openSafari(url, UA)
+    return jsonify({ list: [], page: 1, pagecount: 1, limit: 30, total: 0 })
   }
   
-  const $ = cheerio.load(html.data)
-  const videos = []
+  const $ = cheerio.load(data)
   
   $('a[href*="program_download"]').each((_, e) => {
     const href = $(e).attr('href')
@@ -205,12 +120,12 @@ async function getCards(ext) {
         if (imgSrc.startsWith('http')) {
           pic = imgSrc
         } else {
-          pic = appConfig.site + (imgSrc.startsWith('/') ? imgSrc : '/' + imgSrc)
+          pic = appConfig.site + imgSrc
         }
       }
       
       let remark = ''
-      const parent = $(e).closest('li') || $(e).closest('div[class*="item"], div[class*="entry"]')
+      const parent = $(e).closest('li, div[class*="item"], div[class*="entry"]')
       if (parent.length) {
         const dateSpan = parent.find('span[class*="date"], span[class*="time"]')
         if (dateSpan.length) {
@@ -218,19 +133,20 @@ async function getCards(ext) {
         }
       }
       
-      videos.push({
+      cards.push({
         vod_id: vid,
         vod_name: title,
         vod_pic: pic,
         vod_remarks: remark,
         ext: {
+          url: href,
           vid: vid,
-        }
+        },
       })
     }
   })
   
-  // 计算分页
+  // 计算总页数
   let pageCount = 1
   const pagination = $('div[class*="page"], div[class*="pagination"]')
   if (pagination.length) {
@@ -253,138 +169,87 @@ async function getCards(ext) {
     }
   }
   
-  if (pageCount <= parseInt(page) && videos.length) {
-    pageCount = parseInt(page) + 1
+  if (pageCount < page) {
+    pageCount = page
   }
   
-  // 筛选器
+  // 年份筛选
   const currentYear = new Date().getFullYear()
   const years = [{ n: '全部年份', v: '' }]
-  for (let y = currentYear; y > 2002; y--) {
+  for (let y = currentYear; y > 2012; y--) {
     years.push({ n: String(y), v: String(y) })
   }
   
+  // 月份筛选
   const months = [{ n: '全部月份', v: '' }]
   for (let m = 1; m <= 12; m++) {
     months.push({ n: `${m}月`, v: String(m) })
   }
   
   return jsonify({
-    list: videos,
+    list: cards,
     page: parseInt(page),
     pagecount: pageCount,
     limit: 30,
-    total: videos.length,
+    total: cards.length,
     filter: [
-      { key: 'year', name: '年份', init: filters.year || '', value: years },
-      { key: 'month', name: '月份', init: filters.month || '', value: months }
-    ]
+      {
+        key: 'year',
+        name: '年份',
+        init: '',
+        value: years,
+      },
+      {
+        key: 'month',
+        name: '月份',
+        init: '',
+        value: months,
+      },
+    ],
   })
 }
 
-// ========== 搜索 ==========
-async function searchContent(key, quick, pg = '1') {
-  const encodedKey = encodeURIComponent(key)
-  const searchUrls = [
-    `${appConfig.site}/so-${pg}-${encodedKey}.html`,
-    `${appConfig.site}/so.html?wd=${encodedKey}&page=${pg}`,
-    `${appConfig.site}/search.php?keyword=${encodedKey}&page=${pg}`
-  ]
-  
-  let html = null
-  for (const url of searchUrls) {
-    try {
-      const resp = await request(url)
-      if (resp && resp.data) {
-        html = resp.data
-        break
-      }
-    } catch(e) {
-      console.log('搜索请求失败:', url)
-    }
-  }
-  
-  if (!html) return jsonify({ list: [] })
-  
-  const $ = cheerio.load(html)
-  const results = []
-  const seenIds = new Set()
-  
-  $('a[href*="program_download"]').each((_, e) => {
-    const href = $(e).attr('href')
-    const title = $(e).text().trim()
-    
-    if (!title || title.length < 2) return
-    
-    const vidMatch = href && href.match(/program_download-?(\d+)\.html/)
-    if (vidMatch) {
-      const vid = vidMatch[1]
-      if (title.toLowerCase().includes(key.toLowerCase()) && !seenIds.has(vid)) {
-        seenIds.add(vid)
-        results.push({
-          vod_id: vid,
-          vod_name: title,
-          vod_pic: appConfig.defaultPic,
-          vod_remarks: '搜索结果',
-          ext: {
-            vid: vid,
-          }
-        })
-      }
-    }
-  })
-  
-  return jsonify({ list: results })
-}
-
-// ========== 节目详情 ==========
 async function getTracks(ext) {
   ext = argsify(ext)
-  const vid = ext.vid
-  const url = `${appConfig.site}/program_download-${vid}.html`
+  let url = ext.url || `${appConfig.site}/program_download-${ext.vid}.html`
   
   console.log('获取详情页:', url)
   
-  const resp = await request(url)
-  if (!resp || !resp.data) {
+  const { data } = await $fetch.get(url, {
+    headers: {
+      'User-Agent': UA,
+    },
+  })
+  
+  if (data && data.includes('Just a moment...')) {
+    $utils.openSafari(url, UA)
     return jsonify({ list: [] })
   }
   
-  const html = resp.data
-  const $ = cheerio.load(html)
+  const $ = cheerio.load(data)
   
   // 提取原标题
-  let originalTitle = ''
-  const titleTag = $('title').text().trim()
-  if (titleTag) {
-    originalTitle = titleTag.replace(/[-|]\s*LoveQ.*$/, '').trim()
-  }
-  
-  if (!originalTitle) {
-    originalTitle = `节目${vid}`
-  }
+  let originalTitle = $('title').text().trim()
+  originalTitle = originalTitle.replace(/[-|]\s*LoveQ.*$/, '').trim()
+  if (!originalTitle) originalTitle = `节目${ext.vid}`
   
   // 提取发布日期和内容
   let pubDate = ''
   let content = ''
   
-  const pdl1List = $('ul.pdl1')
-  if (pdl1List.length) {
-    pdl1List.find('li').each((_, li) => {
-      const liText = $(li).text().trim()
-      
-      if (liText.includes('发布日期：') || liText.includes('发布时间：')) {
-        const dateMatch = liText.match(/(\d{4}[-\/]\d{2}[-\/]\d{2})/)
-        if (dateMatch) {
-          pubDate = dateMatch[1]
-        } else {
-          pubDate = liText.replace(/^(发布日期|发布时间)[：:]/, '').trim()
-        }
-      } else if (liText.includes('节目内容：') || liText.includes('内容简介：')) {
-        content = liText.replace(/^(节目内容|内容简介)[：:]/, '').trim()
+  $('ul.pdl1 li').each((_, li) => {
+    const liText = $(li).text().trim()
+    if (liText.includes('发布日期：') || liText.includes('发布时间：')) {
+      const dateMatch = liText.match(/(\d{4}[-\/]\d{2}[-\/]\d{2})/)
+      if (dateMatch) {
+        pubDate = dateMatch[1]
+      } else {
+        pubDate = liText.replace(/^(发布日期|发布时间)[：:]/, '').trim()
       }
-    })
-  }
+    } else if (liText.includes('节目内容：') || liText.includes('内容简介：')) {
+      content = liText.replace(/^(节目内容|内容简介)[：:]/, '').trim()
+    }
+  })
   
   if (!content) {
     const metaDesc = $('meta[name="description"]').attr('content')
@@ -398,52 +263,54 @@ async function getTracks(ext) {
     }
   }
   
-  if (content && /^\d{4}[-\/]\d{2}[-\/]\d{2}\s*$/.test(content)) {
+  if (!content || (content && /^\d{4}[-\/]\d{2}[-\/]\d{2}\s*$/.test(content))) {
     content = '暂无节目简介'
   }
-  if (!content) content = '暂无节目简介'
   
-  // 新标题格式：发布日期 + 节目内容
-  let newTitle = originalTitle
+  // 新标题格式
+  let vodName = originalTitle
   if (pubDate) {
     const formattedDate = pubDate.replace(/\//g, '-')
     const contentPreview = content.length > 50 ? content.slice(0, 50) : content
-    newTitle = `${formattedDate} - ${contentPreview}`
+    vodName = `${formattedDate} - ${contentPreview}`
   }
   
   const desc = pubDate ? `📅 发布日期：${pubDate}\n📝 ${content}` : content
   
-  // ========== 提取音频链接 ==========
+  // ========== 提取音频链接（与Python版本一致）==========
   let audioUrl = ''
   
-  // 匹配完整格式
-  const pattern = /https?:\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/i
-  const match = html.match(pattern)
-  if (match) {
-    audioUrl = match[0]
+  // 方法1：匹配完整格式的音频链接
+  // 格式: https://dl2.loveq.cn:8090/live/program/2017/1500229358423534874.mp3?sign=xxx&timestamp=xxx
+  const pattern = /https?:\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/gi
+  const matches = data.match(pattern)
+  if (matches && matches.length > 0) {
+    audioUrl = matches[0]
     console.log('找到音频:', audioUrl)
   }
   
-  // 匹配相对路径
+  // 方法2：匹配协议相对路径的版本
   if (!audioUrl) {
-    const patternRel = /\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/i
-    const matchRel = html.match(patternRel)
-    if (matchRel) {
-      audioUrl = 'https:' + matchRel[0]
-      console.log('找到音频:', audioUrl)
+    const patternRel = /\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/gi
+    const matchesRel = data.match(patternRel)
+    if (matchesRel && matchesRel.length > 0) {
+      audioUrl = 'https:' + matchesRel[0]
+      console.log('找到相对路径音频:', audioUrl)
     }
   }
   
-  // 从audio/source标签提取
+  // 方法3：从audio或source标签中提取
   if (!audioUrl) {
     $('audio, source').each((_, tag) => {
       const src = $(tag).attr('src') || ''
-      if (src && src.includes('dl2.loveq.cn') && src.includes('.mp3')) {
-        if (src.match(/\.mp3\?/i) && src.includes('sign=') && src.includes('timestamp=')) {
-          audioUrl = src.startsWith('//') ? 'https:' + src : src
-          console.log('找到音频:', audioUrl)
-          return false
+      if (src && src.includes('dl2.loveq.cn') && src.includes('.mp3') && src.includes('sign=') && src.includes('timestamp=')) {
+        if (src.startsWith('//')) {
+          audioUrl = 'https:' + src
+        } else {
+          audioUrl = src
         }
+        console.log('从标签找到音频:', audioUrl)
+        return false
       }
     })
   }
@@ -466,13 +333,70 @@ async function getTracks(ext) {
     return jsonify({ list: [] })
   }
   
+  // 返回播放地址（单线路）
   return jsonify({
     list: [{
-      vod_id: vid,
-      vod_name: newTitle,
+      vod_id: ext.vid,
+      vod_name: vodName,
       vod_pic: vodPic,
       vod_content: desc,
       vod_play_url: audioUrl,
     }],
   })
+}
+
+async function searchContent(key, quick, pg = '1') {
+  const encodedKey = encodeURIComponent(key)
+  const searchUrls = [
+    `${appConfig.site}/so-${pg}-${encodedKey}.html`,
+    `${appConfig.site}/so.html?wd=${encodedKey}&page=${pg}`,
+    `${appConfig.site}/search.php?keyword=${encodedKey}&page=${pg}`,
+  ]
+  
+  let data = null
+  for (const url of searchUrls) {
+    try {
+      const resp = await $fetch.get(url, {
+        headers: { 'User-Agent': UA },
+      })
+      if (resp && resp.data) {
+        data = resp.data
+        break
+      }
+    } catch(e) {
+      console.log('搜索请求失败:', url)
+    }
+  }
+  
+  if (!data) return jsonify({ list: [] })
+  
+  const $ = cheerio.load(data)
+  const results = []
+  const seenIds = new Set()
+  
+  $('a[href*="program_download"]').each((_, e) => {
+    const href = $(e).attr('href')
+    const title = $(e).text().trim()
+    
+    if (!title || title.length < 2) return
+    
+    const vidMatch = href && href.match(/program_download-?(\d+)\.html/)
+    if (vidMatch) {
+      const vid = vidMatch[1]
+      if (title.toLowerCase().includes(key.toLowerCase()) && !seenIds.has(vid)) {
+        seenIds.add(vid)
+        results.push({
+          vod_id: vid,
+          vod_name: title,
+          vod_pic: appConfig.defaultPic,
+          vod_remarks: '搜索结果',
+          ext: {
+            vid: vid,
+          },
+        })
+      }
+    }
+  })
+  
+  return jsonify({ list: results })
 }
