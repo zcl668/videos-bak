@@ -7,7 +7,7 @@ async function getLocalInfo() {
   return jsonify(appConfig)
 }
 
-const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko) Version/18.2 Mobile/15E148 Safari/604.1'
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 const cheerio = createCheerio()
 
 let $config = argsify($config_str)
@@ -16,8 +16,8 @@ const appConfig = {
   ver: 1,
   title: 'LoveQ',
   site: 'https://www.loveq.cn',
-  defaultPic: 'https://www.loveq.cn/themes/loveq/loveautumn/appimg/qr-code.gif?20180304.gif',
-  dexianPic: 'https://www.loveq.cn/themes/loveq/loveautumn/appimg/qr-code.gif?20180304.gif',
+  defaultPic: 'https://raw.githubusercontent.com/zcl668/videos-bak/main/loveq2026.jpg',
+  dexianPic: 'https://raw.githubusercontent.com/zcl668/videos-bak/main/loveq2026.jpg',
   filterCategories: ["盛世乾坤", "一些事一些情", "一些事一些情精华剪辑"],
 }
 
@@ -63,6 +63,27 @@ async function getConfig() {
   let config = { ...appConfig }
   const categories = await getCategories()
   
+  // 年份筛选
+  const currentYear = new Date().getFullYear()
+  const years = [{ n: '全部年份', v: '' }]
+  for (let y = currentYear; y > 2002; y--) {
+    years.push({ n: String(y), v: String(y) })
+  }
+  
+  // 月份筛选
+  const months = [{ n: '全部月份', v: '' }]
+  for (let m = 1; m <= 12; m++) {
+    months.push({ n: `${m}月`, v: String(m) })
+  }
+  
+  const filters = {}
+  for (const cat of categories) {
+    filters[cat.type_id] = [
+      { key: 'year', name: '年份', value: years },
+      { key: 'month', name: '月份', value: months }
+    ]
+  }
+  
   config.tabs = categories.map(cat => ({
     name: cat.type_name,
     ui: 1,
@@ -71,22 +92,30 @@ async function getConfig() {
     },
   }))
   
+  config.filters = filters
+  
   return jsonify(config)
 }
 
 async function getCards(ext) {
   ext = argsify(ext)
-  let cards = []
+  let videos = []
   let { page = 1, id, filters = {} } = ext
   
-  let url = appConfig.site + `/program.html?cat_id=${id}&page=${page}`
+  let url = appConfig.site + `/program.html`
+  
+  const params = new URLSearchParams()
+  params.append('cat_id', id)
+  params.append('page', page)
   
   if (filters.year && filters.year !== '') {
-    url += `&year=${encodeURIComponent(filters.year)}`
+    params.append('year', filters.year)
   }
   if (filters.month && filters.month !== '') {
-    url += `&month=${encodeURIComponent(filters.month)}`
+    params.append('month', filters.month)
   }
+  
+  url = url + '?' + params.toString()
   
   console.log('Requesting:', url)
   
@@ -125,28 +154,24 @@ async function getCards(ext) {
       }
       
       let remark = ''
-      const parent = $(e).closest('li, div[class*="item"], div[class*="entry"]')
-      if (parent.length) {
+      const parent = $(e).closest('li') || $(e).closest('div[class*="item"], div[class*="entry"]')
+      if (parent && parent.length) {
         const dateSpan = parent.find('span[class*="date"], span[class*="time"]')
         if (dateSpan.length) {
           remark = dateSpan.text().trim()
         }
       }
       
-      cards.push({
+      videos.push({
         vod_id: vid,
         vod_name: title,
         vod_pic: pic,
         vod_remarks: remark,
-        ext: {
-          url: href,
-          vid: vid,
-        },
       })
     }
   })
   
-  // 计算总页数
+  // 计算分页
   let pageCount = 1
   const pagination = $('div[class*="page"], div[class*="pagination"]')
   if (pagination.length) {
@@ -169,49 +194,23 @@ async function getCards(ext) {
     }
   }
   
-  if (pageCount < page) {
-    pageCount = page
-  }
-  
-  // 年份筛选
-  const currentYear = new Date().getFullYear()
-  const years = [{ n: '全部年份', v: '' }]
-  for (let y = currentYear; y > 2012; y--) {
-    years.push({ n: String(y), v: String(y) })
-  }
-  
-  // 月份筛选
-  const months = [{ n: '全部月份', v: '' }]
-  for (let m = 1; m <= 12; m++) {
-    months.push({ n: `${m}月`, v: String(m) })
+  if (pageCount < parseInt(page)) {
+    pageCount = parseInt(page)
   }
   
   return jsonify({
-    list: cards,
+    list: videos,
     page: parseInt(page),
     pagecount: pageCount,
     limit: 30,
-    total: cards.length,
-    filter: [
-      {
-        key: 'year',
-        name: '年份',
-        init: '',
-        value: years,
-      },
-      {
-        key: 'month',
-        name: '月份',
-        init: '',
-        value: months,
-      },
-    ],
+    total: videos.length,
   })
 }
 
 async function getTracks(ext) {
   ext = argsify(ext)
-  let url = ext.url || `${appConfig.site}/program_download-${ext.vid}.html`
+  const vid = ext.vid
+  const url = `${appConfig.site}/program_download-${vid}.html`
   
   console.log('获取详情页:', url)
   
@@ -231,7 +230,7 @@ async function getTracks(ext) {
   // 提取原标题
   let originalTitle = $('title').text().trim()
   originalTitle = originalTitle.replace(/[-|]\s*LoveQ.*$/, '').trim()
-  if (!originalTitle) originalTitle = `节目${ext.vid}`
+  if (!originalTitle) originalTitle = `节目${vid}`
   
   // 提取发布日期和内容
   let pubDate = ''
@@ -263,56 +262,61 @@ async function getTracks(ext) {
     }
   }
   
-  if (!content || (content && /^\d{4}[-\/]\d{2}[-\/]\d{2}\s*$/.test(content))) {
+  if (content && /^\d{4}[-\/]\d{2}[-\/]\d{2}\s*$/.test(content)) {
+    content = '暂无节目简介'
+  }
+  if (!content) {
     content = '暂无节目简介'
   }
   
-  // 新标题格式
-  let vodName = originalTitle
+  // 新标题格式：发布日期 + 节目内容
+  let newTitle = originalTitle
   if (pubDate) {
     const formattedDate = pubDate.replace(/\//g, '-')
     const contentPreview = content.length > 50 ? content.slice(0, 50) : content
-    vodName = `${formattedDate} - ${contentPreview}`
+    newTitle = `${formattedDate} - ${contentPreview}`
   }
   
+  // 描述信息
   const desc = pubDate ? `📅 发布日期：${pubDate}\n📝 ${content}` : content
   
-  // ========== 提取音频链接（与Python版本一致）==========
-  let audioUrl = ''
+  // ========== 提取音频链接（与Python版本完全一致）==========
+  let playUrl = '暂无音频'
   
-  // 方法1：匹配完整格式的音频链接
+  // 匹配完整格式的音频链接
   // 格式: https://dl2.loveq.cn:8090/live/program/2017/1500229358423534874.mp3?sign=xxx&timestamp=xxx
   const pattern = /https?:\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/gi
   const matches = data.match(pattern)
-  if (matches && matches.length > 0) {
-    audioUrl = matches[0]
-    console.log('找到音频:', audioUrl)
-  }
   
-  // 方法2：匹配协议相对路径的版本
-  if (!audioUrl) {
+  if (matches && matches.length > 0) {
+    playUrl = `LoveQ音频$${matches[0]}`
+    console.log('找到音频:', matches[0])
+  } else {
+    // 匹配协议相对路径的版本
     const patternRel = /\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/gi
     const matchesRel = data.match(patternRel)
     if (matchesRel && matchesRel.length > 0) {
-      audioUrl = 'https:' + matchesRel[0]
-      console.log('找到相对路径音频:', audioUrl)
-    }
-  }
-  
-  // 方法3：从audio或source标签中提取
-  if (!audioUrl) {
-    $('audio, source').each((_, tag) => {
-      const src = $(tag).attr('src') || ''
-      if (src && src.includes('dl2.loveq.cn') && src.includes('.mp3') && src.includes('sign=') && src.includes('timestamp=')) {
-        if (src.startsWith('//')) {
-          audioUrl = 'https:' + src
-        } else {
-          audioUrl = src
+      playUrl = `LoveQ音频$https:${matchesRel[0]}`
+      console.log('找到相对路径音频:', matchesRel[0])
+    } else {
+      // 从audio或source标签中提取
+      let audioSrc = ''
+      $('audio, source').each((_, tag) => {
+        const src = $(tag).attr('src') || ''
+        if (src && src.includes('dl2.loveq.cn') && src.includes('.mp3') && src.includes('sign=') && src.includes('timestamp=')) {
+          audioSrc = src
+          return false
         }
-        console.log('从标签找到音频:', audioUrl)
-        return false
+      })
+      if (audioSrc) {
+        if (audioSrc.startsWith('//')) {
+          playUrl = `LoveQ音频$https:${audioSrc}`
+        } else {
+          playUrl = `LoveQ音频$${audioSrc}`
+        }
+        console.log('从标签找到音频:', audioSrc)
       }
-    })
+    }
   }
   
   // 封面图片
@@ -323,24 +327,27 @@ async function getTracks(ext) {
     const imgTag = $('img[class*="cover"], img[class*="poster"], img[class*="pic"]')
     if (imgTag.length && imgTag.attr('src')) {
       let imgSrc = imgTag.attr('src')
-      vodPic = imgSrc.startsWith('http') ? imgSrc : appConfig.site + imgSrc
+      if (imgSrc.startsWith('http')) {
+        vodPic = imgSrc
+      } else {
+        vodPic = appConfig.site + imgSrc
+      }
     }
   }
   
-  if (!audioUrl) {
+  if (playUrl === '暂无音频') {
     console.log('未找到音频链接')
     $utils.toastError('未找到音频链接')
-    return jsonify({ list: [] })
   }
   
-  // 返回播放地址（单线路）
   return jsonify({
     list: [{
-      vod_id: ext.vid,
-      vod_name: vodName,
+      vod_id: vid,
+      vod_name: newTitle,
       vod_pic: vodPic,
       vod_content: desc,
-      vod_play_url: audioUrl,
+      vod_play_from: '木凡的天空',
+      vod_play_url: playUrl,
     }],
   })
 }
@@ -353,14 +360,14 @@ async function searchContent(key, quick, pg = '1') {
     `${appConfig.site}/search.php?keyword=${encodedKey}&page=${pg}`,
   ]
   
-  let data = null
+  let html = ''
   for (const url of searchUrls) {
     try {
-      const resp = await $fetch.get(url, {
+      const { data } = await $fetch.get(url, {
         headers: { 'User-Agent': UA },
       })
-      if (resp && resp.data) {
-        data = resp.data
+      if (data) {
+        html = data
         break
       }
     } catch(e) {
@@ -368,9 +375,9 @@ async function searchContent(key, quick, pg = '1') {
     }
   }
   
-  if (!data) return jsonify({ list: [] })
+  if (!html) return jsonify({ list: [] })
   
-  const $ = cheerio.load(data)
+  const $ = cheerio.load(html)
   const results = []
   const seenIds = new Set()
   
@@ -383,17 +390,16 @@ async function searchContent(key, quick, pg = '1') {
     const vidMatch = href && href.match(/program_download-?(\d+)\.html/)
     if (vidMatch) {
       const vid = vidMatch[1]
-      if (title.toLowerCase().includes(key.toLowerCase()) && !seenIds.has(vid)) {
-        seenIds.add(vid)
-        results.push({
-          vod_id: vid,
-          vod_name: title,
-          vod_pic: appConfig.defaultPic,
-          vod_remarks: '搜索结果',
-          ext: {
-            vid: vid,
-          },
-        })
+      if (key.toLowerCase().includes(key.toLowerCase()) || key.includes(key)) {
+        if (!seenIds.has(vid)) {
+          seenIds.add(vid)
+          results.push({
+            vod_id: vid,
+            vod_name: title,
+            vod_pic: appConfig.defaultPic,
+            vod_remarks: '搜索结果',
+          })
+        }
       }
     }
   })
