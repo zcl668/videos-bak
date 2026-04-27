@@ -3,7 +3,7 @@
         {
             "name": "LoveQ", 
             "type": 3, 
-            "api": "csp_LoveQ",
+            "api": "csp_Loveq",
             "ext": "https://raw.githubusercontent.com/zcl668/videos-bak/main/loveq_vod.js"
         },
         {
