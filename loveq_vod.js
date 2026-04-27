@@ -22,7 +22,6 @@ const appConfig = {
 async function getConfig() {
     let config = { ...appConfig };
     
-    // 获取分类列表作为 tabs
     const html = await get(`${appConfig.site}/program.html`);
     if (html) {
         const $ = cheerio.load(html);
@@ -52,7 +51,6 @@ async function getConfig() {
         
         tabs.sort((a, b) => parseInt(a.ext.id) - parseInt(b.ext.id));
         
-        // 添加搜索 tab
         tabs.unshift({
             name: '🔍 搜索',
             ui: 2,
@@ -261,19 +259,23 @@ async function getTracks(ext) {
     
     const desc = pubDate ? `📅 发布日期：${pubDate}\n📝 ${content}` : content;
     
-    // 线路12：提取音频链接
+    // ========== 只保留线路12的音频链接 ==========
     const audioLinks = [];
+    
+    // 线路12格式: https://dl2.loveq.cn:8090/live/program/xxx/xxx.mp3?sign=xxx&timestamp=xxx
     const pattern = /https?:\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/gi;
     let match;
     while ((match = pattern.exec(html)) !== null) {
         audioLinks.push(match[0]);
     }
     
+    // 协议相对路径
     const patternRel = /\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/gi;
     while ((match = patternRel.exec(html)) !== null) {
         audioLinks.push('https:' + match[0]);
     }
     
+    // 从 audio/source 标签提取
     $('audio, source').each((_, tag) => {
         const src = $(tag).attr('src');
         if (src && src.includes('dl2.loveq.cn') && /\.mp3\?/.test(src) && src.includes('sign=') && src.includes('timestamp=')) {
@@ -281,12 +283,14 @@ async function getTracks(ext) {
         }
     });
     
+    // 去重
     const validLinks = [...new Set(audioLinks)];
     
+    // 构建播放URL - 只有线路12
     let playUrl = "暂无音频";
     if (validLinks.length > 0) {
         if (validLinks.length > 1) {
-            playUrl = validLinks.map((link, i) => `线路12$${link}`).join('$$$');
+            playUrl = validLinks.map((link) => `线路12$${link}`).join('$$$');
         } else {
             playUrl = `线路12$${validLinks[0]}`;
         }
@@ -312,14 +316,7 @@ async function getTracks(ext) {
             title: newTitle,
             pic: vodPic,
             desc: desc,
-            tracks: [{
-                name: '线路12',
-                tracks: validLinks.map((link, idx) => ({
-                    name: `音频 ${idx + 1}`,
-                    pan: '',
-                    ext: { url: link }
-                }))
-            }]
+            play_url: playUrl
         }]
     });
 }
