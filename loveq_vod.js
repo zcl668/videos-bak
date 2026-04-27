@@ -162,20 +162,22 @@ async function getTracks(ext) {
 
     let tracks = []
 
-    const reg = /https?:\/\/[^"' ]+\.mp3[^"' ]*/ig
+    // ✅ 只匹配你原PY那种“有效线路”
+    const reg = /https?:\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/ig
+
     let matches = data.match(reg) || []
 
     let unique = [...new Set(matches)]
 
     unique.forEach((u, i) => {
 
-        // ✅ 主线路
+        // ✅ 主线路（原始）
         tracks.push({
             name: `线路${i + 1}`,
             ext: { url: u }
         })
 
-        // ✅ 备用（防SSL）
+        // ✅ 备用（仅做SSL兼容）
         tracks.push({
             name: `线路${i + 1}-备用`,
             ext: { url: u.replace('https://', 'http://') }
