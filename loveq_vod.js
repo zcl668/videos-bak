@@ -5,14 +5,14 @@ const appConfig = {
     ver: 1,
     title: 'LoveQ Pro',
     site: 'https://www.loveq.cn',
-    api: 'csp_loveq',   // ✅ 必须有
+    api: 'csp_loveq'
 }
 
-// ================= 本地识别 =================
+// ================= 本地信息 =================
 async function getLocalInfo() {
     return jsonify({
         ver: 1,
-        name: 'LoveQ(本地)',
+        name: 'LoveQ(终极版)',
         api: appConfig.api
     })
 }
@@ -86,10 +86,14 @@ async function getCards(ext) {
         })
     })
 
-    return jsonify({ list })
+    return jsonify({
+        list,
+        page,
+        pagecount: page + 1
+    })
 }
 
-// ================= 线路 =================
+// ================= 线路（抗封锁核心） =================
 async function getTracks(ext) {
     ext = argsify(ext)
 
@@ -99,36 +103,74 @@ async function getTracks(ext) {
 
     let tracks = []
 
+    // 抓所有 mp3
     const reg = /https?:\/\/[^"' ]+\.mp3[^"' ]*/ig
     let matches = data.match(reg) || []
 
     let unique = [...new Set(matches)]
 
     unique.forEach((u, i) => {
+
+        // HTTPS
         tracks.push({
-            name: `线路${i + 1}`,
+            name: `线路${i + 1}-HTTPS`,
             ext: { url: u }
+        })
+
+        // HTTP（绕 SSL）
+        tracks.push({
+            name: `线路${i + 1}-HTTP`,
+            ext: { url: u.replace('https://', 'http://') }
+        })
+
+        // 直连模式
+        tracks.push({
+            name: `线路${i + 1}-直连`,
+            ext: { url: u, direct: true }
         })
     })
 
+    if (tracks.length === 0) {
+        tracks.push({
+            name: '无资源',
+            ext: { url: '' }
+        })
+    }
+
     return jsonify({
         list: [{
-            title: '播放列表',
+            title: '抗封锁播放',
             tracks
         }]
     })
 }
 
-// ================= 播放 =================
+// ================= 播放（终极修复） =================
 async function getPlayinfo(ext) {
     ext = argsify(ext)
 
+    let url = ext.url
+
+    // 双协议
+    let urls = [
+        url,
+        url.replace('https://', 'http://')
+    ]
+
+    urls = [...new Set(urls)]
+
     return jsonify({
-        urls: [ext.url],
-        headers: [{
+        parse: 0,
+        playUrl: '',
+        urls: urls,
+
+        headers: urls.map(() => ({
             'User-Agent': UA,
-            'Referer': appConfig.site
-        }]
+            'Referer': appConfig.site,
+            'Origin': appConfig.site,
+            'Accept': '*/*',
+            'Connection': 'keep-alive'
+        }))
     })
 }
 
@@ -137,13 +179,28 @@ async function search(ext) {
     ext = argsify(ext)
 
     let text = encodeURIComponent(ext.text)
-    let url = `${appConfig.site}/so.html?wd=${text}`
+    let page = ext.page || 1
 
-    const { data } = await $fetch.get(url, {
-        headers: { 'User-Agent': UA }
-    })
+    const urls = [
+        `${appConfig.site}/so-${page}-${text}.html`,
+        `${appConfig.site}/so.html?wd=${text}&page=${page}`
+    ]
 
-    const $ = cheerio.load(data)
+    let html = ''
+
+    for (let u of urls) {
+        try {
+            const res = await $fetch.get(u, {
+                headers: { 'User-Agent': UA }
+            })
+            if (res.data && res.data.length > 1000) {
+                html = res.data
+                break
+            }
+        } catch (e) {}
+    }
+
+    const $ = cheerio.load(html)
     let list = []
 
     $('a[href*="program_download"]').each((_, e) => {
@@ -164,5 +221,9 @@ async function search(ext) {
         })
     })
 
-    return jsonify({ list })
+    return jsonify({
+        list,
+        page,
+        pagecount: page + 1
+    })
 }
