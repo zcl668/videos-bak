@@ -21,13 +21,54 @@ const appConfig = {
   filterCategories: ["盛世乾坤", "一些事一些情", "一些事一些情精华剪辑"],
 }
 
+// 封装请求函数
+async function request(url, options = {}) {
+  try {
+    // 优先使用 $http
+    if (typeof $http !== 'undefined' && $http.get) {
+      const response = await $http.get(url, {
+        headers: {
+          'User-Agent': UA,
+          ...options.headers,
+        },
+        timeout: 30000,
+      })
+      return { data: response.data || response }
+    }
+    
+    // 备选：使用 $fetch
+    if (typeof $fetch !== 'undefined' && $fetch.get) {
+      const response = await $fetch.get(url, {
+        headers: {
+          'User-Agent': UA,
+          ...options.headers,
+        },
+      })
+      return { data: response.data || response }
+    }
+    
+    // 最后备选：原生 fetch
+    if (typeof fetch !== 'undefined') {
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': UA,
+          ...options.headers,
+        },
+      })
+      const data = await response.text()
+      return { data }
+    }
+    
+    throw new Error('No available HTTP client')
+  } catch (error) {
+    console.error('Request failed:', url, error.message)
+    throw error
+  }
+}
+
 async function getCategories() {
   const url = appConfig.site + '/program.html'
-  const { data } = await $fetch.get(url, {
-    headers: {
-      'User-Agent': UA,
-    },
-  })
+  const { data } = await request(url)
   
   if (data && data.includes('Just a moment...')) {
     $utils.openSafari(url, UA)
@@ -90,11 +131,14 @@ async function getCards(ext) {
   
   console.log('Requesting:', url)
   
-  const { data } = await $fetch.get(url, {
-    headers: {
-      'User-Agent': UA,
-    },
-  })
+  let data
+  try {
+    const response = await request(url)
+    data = response.data
+  } catch (error) {
+    console.error('Request error:', error)
+    return jsonify({ list: [], page: 1, pagecount: 1, limit: 30, total: 0 })
+  }
   
   if (data && data.includes('Just a moment...')) {
     $utils.openSafari(url, UA)
@@ -215,11 +259,15 @@ async function getTracks(ext) {
   
   console.log('获取详情页:', url)
   
-  const { data } = await $fetch.get(url, {
-    headers: {
-      'User-Agent': UA,
-    },
-  })
+  let data
+  try {
+    const response = await request(url)
+    data = response.data
+  } catch (error) {
+    console.error('Track request error:', error)
+    $utils.toastError('获取详情失败')
+    return jsonify({ list: [] })
+  }
   
   if (data && data.includes('Just a moment...')) {
     $utils.openSafari(url, UA)
@@ -363,15 +411,14 @@ async function searchContent(key, quick, pg = '1') {
   let data = null
   for (const url of searchUrls) {
     try {
-      const resp = await $fetch.get(url, {
-        headers: { 'User-Agent': UA },
-      })
-      if (resp && resp.data) {
-        data = resp.data
+      const response = await request(url)
+      if (response && response.data) {
+        data = response.data
+        console.log('搜索成功:', url)
         break
       }
     } catch(e) {
-      console.log('搜索请求失败:', url)
+      console.log('搜索请求失败:', url, e.message)
     }
   }
   
@@ -399,6 +446,7 @@ async function searchContent(key, quick, pg = '1') {
           vod_remarks: '搜索结果',
           ext: {
             vid: vid,
+            url: href,
           },
         })
       }
