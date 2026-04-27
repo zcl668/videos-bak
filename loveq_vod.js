@@ -21,52 +21,6 @@ const appConfig = {
   filterCategories: ["盛世乾坤", "一些事一些情", "一些事一些情精华剪辑"],
 }
 
-// 提取音频链接的专用函数，支持多种匹配模式
-function extractMp3Url(html, $) {
-  // 方法1：匹配完整格式的mp3链接（带sign和timestamp）
-  const mp3Match = html.match(/https?:\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/i)
-  if (mp3Match) {
-    console.log('方法1找到音频:', mp3Match[0])
-    return mp3Match[0]
-  }
-  
-  // 方法2：匹配相对路径格式
-  const relMatch = html.match(/\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/i)
-  if (relMatch) {
-    console.log('方法2找到音频:', 'https:' + relMatch[0])
-    return 'https:' + relMatch[0]
-  }
-  
-  // 方法3：从audio或source标签提取
-  if ($) {
-    let audioUrl = ''
-    $('audio, source').each((_, tag) => {
-      let src = $(tag).attr('src') || ''
-      if (src && src.includes('dl2.loveq.cn') && src.includes('.mp3')) {
-        if (src.startsWith('//')) src = 'https:' + src
-        if (!audioUrl) audioUrl = src
-      }
-    })
-    if (audioUrl) {
-      console.log('方法3找到音频:', audioUrl)
-      return audioUrl
-    }
-  }
-  
-  // 方法4：从script或任意属性中提取mp3链接
-  const scriptMatch = html.match(/https?:\/\/[^\s"']+\.mp3\?[^\s"']+/gi)
-  if (scriptMatch) {
-    for (const link of scriptMatch) {
-      if (link.includes('dl2.loveq.cn')) {
-        console.log('方法4找到音频:', link)
-        return link
-      }
-    }
-  }
-  
-  return null
-}
-
 async function getCategories() {
   const url = appConfig.site + '/program.html'
   const { data } = await $fetch.get(url, {
@@ -257,42 +211,18 @@ async function getCards(ext) {
 
 async function getTracks(ext) {
   ext = argsify(ext)
+  let url = ext.url || `${appConfig.site}/program_download-${ext.vid}.html`
   
-  // 关键修复：每次播放都重新请求详情页，获取最新的音频链接
-  const detailUrl = ext.url || `${appConfig.site}/program_download-${ext.vid}.html`
+  console.log('获取详情页:', url)
   
-  console.log('获取实时音频链接:', detailUrl)
-  
-  // 添加完整的请求头模拟真实浏览器
-  const headers = {
-    'User-Agent': UA,
-    'Referer': appConfig.site,
-    'Origin': appConfig.site,
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    'Accept-Language': 'zh-CN,zh;q=0.9',
-    'Accept-Encoding': 'gzip, deflate, br',
-    'Connection': 'keep-alive',
-    'Upgrade-Insecure-Requests': '1',
-  }
-  
-  let data = null
-  let response = null
-  
-  // 尝试获取详情页
-  try {
-    response = await $fetch.get(detailUrl, {
-      headers: headers,
-      timeout: 10000, // 10秒超时
-    })
-    data = response.data
-  } catch (error) {
-    console.log('请求详情页失败:', error.message)
-    $utils.toastError('获取节目详情失败')
-    return jsonify({ list: [] })
-  }
+  const { data } = await $fetch.get(url, {
+    headers: {
+      'User-Agent': UA,
+    },
+  })
   
   if (data && data.includes('Just a moment...')) {
-    $utils.openSafari(detailUrl, UA)
+    $utils.openSafari(url, UA)
     return jsonify({ list: [] })
   }
   
@@ -347,8 +277,50 @@ async function getTracks(ext) {
   
   const desc = pubDate ? `📅 发布日期：${pubDate}\n📝 ${content}` : content
   
-  // 使用改进的提取函数获取实时音频链接
-  let audioUrl = extractMp3Url(data, $)
+  // ========== 提取音频链接 ==========
+  let audioUrl = ''
+  
+  // 方法1：匹配完整格式
+  const mp3Match = data.match(/https?:\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/i)
+  if (mp3Match) {
+    audioUrl = mp3Match[0]
+    console.log('方法1找到音频:', audioUrl)
+  }
+  
+  // 方法2：匹配相对路径
+  if (!audioUrl) {
+    const relMatch = data.match(/\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/i)
+    if (relMatch) {
+      audioUrl = 'https:' + relMatch[0]
+      console.log('方法2找到音频:', audioUrl)
+    }
+  }
+  
+  // 方法3：从audio标签提取
+  if (!audioUrl) {
+    $('audio, source').each((_, tag) => {
+      let src = $(tag).attr('src') || ''
+      if (src && src.includes('dl2.loveq.cn') && src.includes('.mp3')) {
+        if (src.startsWith('//')) src = 'https:' + src
+        if (!audioUrl) audioUrl = src
+      }
+    })
+    if (audioUrl) console.log('方法3找到音频:', audioUrl)
+  }
+  
+  // 方法4：从script中提取
+  if (!audioUrl) {
+    const scriptMatch = data.match(/https?:\/\/[^\s"']+\.mp3\?[^\s"']+/gi)
+    if (scriptMatch) {
+      for (const link of scriptMatch) {
+        if (link.includes('dl2.loveq.cn')) {
+          audioUrl = link
+          console.log('方法4找到音频:', audioUrl)
+          break
+        }
+      }
+    }
+  }
   
   // 封面图片
   let vodPic = appConfig.defaultPic
@@ -362,20 +334,11 @@ async function getTracks(ext) {
     }
   }
   
-  // 最终检查
   if (!audioUrl) {
-    console.log('未找到音频链接，详情页URL:', detailUrl)
-    $utils.toastError('未找到音频链接，可能节目已下架')
+    console.log('未找到音频链接')
+    $utils.toastError('未找到音频链接')
     return jsonify({ list: [] })
   }
-  
-  // 可选：尝试延长链接有效期（部分服务器支持去除时间戳参数）
-  // 注意：这可能会导致签名验证失败，默认不启用
-  // if (audioUrl.includes('&timestamp=')) {
-  //   audioUrl = audioUrl.replace(/&timestamp=\d+/, '')
-  // }
-  
-  console.log('最终音频链接:', audioUrl)
   
   // 返回播放地址
   return jsonify({
@@ -401,18 +364,14 @@ async function searchContent(key, quick, pg = '1') {
   for (const url of searchUrls) {
     try {
       const resp = await $fetch.get(url, {
-        headers: { 
-          'User-Agent': UA,
-          'Referer': appConfig.site,
-        },
-        timeout: 8000,
+        headers: { 'User-Agent': UA },
       })
       if (resp && resp.data) {
         data = resp.data
         break
       }
     } catch(e) {
-      console.log('搜索请求失败:', url, e.message)
+      console.log('搜索请求失败:', url)
     }
   }
   
