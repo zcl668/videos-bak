@@ -12,34 +12,67 @@ const appConfig = {
 async function getLocalInfo() {
     return jsonify({
         ver: 1,
-        name: 'LoveQ(稳定版)',
+        name: 'LoveQ(还原版)',
         api: appConfig.api
     })
 }
 
-// ================= 配置 =================
+// ================= 配置（带图片分类） =================
 async function getConfig() {
 
-    // ✅ 按你原PY方式：固定分类（示例）
     return jsonify({
         ...appConfig,
         tabs: [
-            { name: '情感', ui: 1, ext: { id: '1' } },
-            { name: '故事', ui: 1, ext: { id: '2' } },
-            { name: '电台', ui: 1, ext: { id: '3' } },
-            { name: '音乐', ui: 1, ext: { id: '4' } },
-            { name: '其他', ui: 1, ext: { id: '5' } }
+            {
+                name: '情感',
+                ui: 1,
+                ext: { id: '1' },
+                style: { type: 'rect', ratio: 1.33 },
+                pic: 'https://raw.githubusercontent.com/zcl668/videos-bak/main/loveq/1.jpg'
+            },
+            {
+                name: '故事',
+                ui: 1,
+                ext: { id: '2' },
+                style: { type: 'rect', ratio: 1.33 },
+                pic: 'https://raw.githubusercontent.com/zcl668/videos-bak/main/loveq/2.jpg'
+            },
+            {
+                name: '电台',
+                ui: 1,
+                ext: { id: '3' },
+                style: { type: 'rect', ratio: 1.33 },
+                pic: 'https://raw.githubusercontent.com/zcl668/videos-bak/main/loveq/3.jpg'
+            },
+            {
+                name: '音乐',
+                ui: 1,
+                ext: { id: '4' },
+                style: { type: 'rect', ratio: 1.33 },
+                pic: 'https://raw.githubusercontent.com/zcl668/videos-bak/main/loveq/4.jpg'
+            },
+            {
+                name: '其他',
+                ui: 1,
+                ext: { id: '5' },
+                style: { type: 'rect', ratio: 1.33 },
+                pic: 'https://raw.githubusercontent.com/zcl668/videos-bak/main/loveq/5.jpg'
+            }
         ]
     })
 }
 
-// ================= 列表 =================
+// ================= 列表（带图片+过滤） =================
 async function getCards(ext) {
     ext = argsify(ext)
 
-    let { id, page = 1 } = ext
+    let { id, page = 1, filters = {} } = ext
 
     let url = `${appConfig.site}/program.html?cat_id=${id}&page=${page}`
+
+    // ✅ 过滤（还原 PY）
+    if (filters.year) url += `&year=${filters.year}`
+    if (filters.month) url += `&month=${filters.month}`
 
     const { data } = await $fetch.get(url, {
         headers: { 'User-Agent': UA }
@@ -52,13 +85,23 @@ async function getCards(ext) {
         const href = $(e).attr('href')
         const title = $(e).text().trim()
 
+        if (!title) return
+
         const match = href.match(/program_download-?(\d+)/)
         if (!match) return
+
+        // ✅ 图片（还原PY）
+        let pic = ''
+
+        let img = $(e).find('img').attr('src')
+        if (img) {
+            pic = img.startsWith('http') ? img : appConfig.site + img
+        }
 
         list.push({
             vod_id: match[1],
             vod_name: title,
-            vod_pic: '',
+            vod_pic: pic,
             vod_remarks: '',
             ext: {
                 url: `${appConfig.site}/program_download-${match[1]}.html`
@@ -69,11 +112,47 @@ async function getCards(ext) {
     return jsonify({
         list,
         page,
-        pagecount: page + 1
+        pagecount: page + 1,
+
+        // ✅ 过滤 UI
+        filter: [
+            {
+                key: 'year',
+                name: '年份',
+                init: '',
+                value: [
+                    { n: '全部', v: '' },
+                    { n: '2026', v: '2026' },
+                    { n: '2025', v: '2025' },
+                    { n: '2024', v: '2024' },
+                    { n: '2023', v: '2023' }
+                ]
+            },
+            {
+                key: 'month',
+                name: '月份',
+                init: '',
+                value: [
+                    { n: '全部', v: '' },
+                    { n: '01', v: '01' },
+                    { n: '02', v: '02' },
+                    { n: '03', v: '03' },
+                    { n: '04', v: '04' },
+                    { n: '05', v: '05' },
+                    { n: '06', v: '06' },
+                    { n: '07', v: '07' },
+                    { n: '08', v: '08' },
+                    { n: '09', v: '09' },
+                    { n: '10', v: '10' },
+                    { n: '11', v: '11' },
+                    { n: '12', v: '12' }
+                ]
+            }
+        ]
     })
 }
 
-// ================= 线路（精简稳定版） =================
+// ================= 线路（只保留稳定2条） =================
 async function getTracks(ext) {
     ext = argsify(ext)
 
@@ -90,13 +169,13 @@ async function getTracks(ext) {
 
     unique.forEach((u, i) => {
 
-        // ✅ 主线路（稳定）
+        // ✅ 主线路
         tracks.push({
             name: `线路${i + 1}`,
             ext: { url: u }
         })
 
-        // ✅ 备用线路（防SSL）
+        // ✅ 备用（防SSL）
         tracks.push({
             name: `线路${i + 1}-备用`,
             ext: { url: u.replace('https://', 'http://') }
@@ -118,15 +197,13 @@ async function getTracks(ext) {
     })
 }
 
-// ================= 播放（稳定版） =================
+// ================= 播放 =================
 async function getPlayinfo(ext) {
     ext = argsify(ext)
 
-    let url = ext.url
-
     return jsonify({
         parse: 0,
-        urls: [url],
+        urls: [ext.url],
         headers: [{
             'User-Agent': UA,
             'Referer': appConfig.site
