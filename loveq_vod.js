@@ -21,57 +21,94 @@ const appConfig = {
   filterCategories: ["盛世乾坤", "一些事一些情", "一些事一些情精华剪辑"],
 }
 
-// 封装请求函数
+// 统一请求函数 - 兼容 Quantumult X / Surge / Loon
 async function request(url, options = {}) {
-  try {
-    // 优先使用 $http
-    if (typeof $http !== 'undefined' && $http.get) {
-      const response = await $http.get(url, {
-        headers: {
-          'User-Agent': UA,
-          ...options.headers,
-        },
-        timeout: 30000,
-      })
-      return { data: response.data || response }
+  // 确保URL完整
+  let fullUrl = url
+  if (!fullUrl.startsWith('http')) {
+    if (fullUrl.startsWith('//')) {
+      fullUrl = 'https:' + fullUrl
+    } else if (fullUrl.startsWith('/')) {
+      fullUrl = appConfig.site + fullUrl
+    } else if (!fullUrl.includes('://')) {
+      fullUrl = appConfig.site + '/' + fullUrl
     }
-    
-    // 备选：使用 $fetch
-    if (typeof $fetch !== 'undefined' && $fetch.get) {
-      const response = await $fetch.get(url, {
-        headers: {
-          'User-Agent': UA,
-          ...options.headers,
-        },
-      })
-      return { data: response.data || response }
-    }
-    
-    // 最后备选：原生 fetch
-    if (typeof fetch !== 'undefined') {
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': UA,
-          ...options.headers,
-        },
-      })
-      const data = await response.text()
-      return { data }
-    }
-    
-    throw new Error('No available HTTP client')
-  } catch (error) {
-    console.error('Request failed:', url, error.message)
-    throw error
   }
+  
+  console.log('Requesting:', fullUrl)
+  
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error('Request timeout: ' + fullUrl))
+    }, 30000)
+    
+    // Quantumult X / Surge
+    if (typeof $task !== 'undefined') {
+      $task.fetch({
+        url: fullUrl,
+        method: 'GET',
+        headers: {
+          'User-Agent': UA,
+          'Accept': 'text/html,application/xhtml+xml',
+          'Accept-Language': 'zh-CN,zh;q=0.9',
+          ...options.headers,
+        },
+      }, (error, response, body) => {
+        clearTimeout(timeout)
+        if (error) {
+          reject(error)
+        } else {
+          resolve({ data: body, response })
+        }
+      })
+    }
+    // Loon
+    else if (typeof $httpClient !== 'undefined') {
+      $httpClient.get({
+        url: fullUrl,
+        headers: {
+          'User-Agent': UA,
+          'Accept': 'text/html,application/xhtml+xml',
+          'Accept-Language': 'zh-CN,zh;q=0.9',
+          ...options.headers,
+        },
+      }, (error, response, body) => {
+        clearTimeout(timeout)
+        if (error) {
+          reject(error)
+        } else {
+          resolve({ data: body, response })
+        }
+      })
+    }
+    // 其他环境
+    else if (typeof fetch !== 'undefined') {
+      fetch(fullUrl, {
+        headers: {
+          'User-Agent': UA,
+          ...options.headers,
+        },
+      })
+        .then(res => res.text())
+        .then(data => {
+          clearTimeout(timeout)
+          resolve({ data })
+        })
+        .catch(reject)
+    }
+    else {
+      clearTimeout(timeout)
+      reject(new Error('No HTTP client available'))
+    }
+  })
 }
 
 async function getCategories() {
-  const url = appConfig.site + '/program.html'
+  const url = '/program.html'
   const { data } = await request(url)
   
-  if (data && data.includes('Just a moment...')) {
-    $utils.openSafari(url, UA)
+  if (!data || data.includes('Just a moment...') || data.includes('Cloudflare')) {
+    $utils.openSafari(appConfig.site + '/program.html', UA)
     return []
   }
   
@@ -120,7 +157,7 @@ async function getCards(ext) {
   let cards = []
   let { page = 1, id, filters = {} } = ext
   
-  let url = appConfig.site + `/program.html?cat_id=${id}&page=${page}`
+  let url = `/program.html?cat_id=${id}&page=${page}`
   
   if (filters.year && filters.year !== '') {
     url += `&year=${encodeURIComponent(filters.year)}`
@@ -129,7 +166,7 @@ async function getCards(ext) {
     url += `&month=${encodeURIComponent(filters.month)}`
   }
   
-  console.log('Requesting:', url)
+  console.log('Requesting cards:', url)
   
   let data
   try {
@@ -140,8 +177,8 @@ async function getCards(ext) {
     return jsonify({ list: [], page: 1, pagecount: 1, limit: 30, total: 0 })
   }
   
-  if (data && data.includes('Just a moment...')) {
-    $utils.openSafari(url, UA)
+  if (!data || data.includes('Just a moment...')) {
+    $utils.openSafari(appConfig.site + url, UA)
     return jsonify({ list: [], page: 1, pagecount: 1, limit: 30, total: 0 })
   }
   
@@ -163,7 +200,7 @@ async function getCards(ext) {
         let imgSrc = imgTag.attr('src')
         if (imgSrc.startsWith('http')) {
           pic = imgSrc
-        } else {
+        } else if (imgSrc.startsWith('/')) {
           pic = appConfig.site + imgSrc
         }
       }
@@ -200,22 +237,11 @@ async function getCards(ext) {
       const pageText = lastPage.text().trim()
       if (/^\d+$/.test(pageText)) {
         pageCount = parseInt(pageText)
-      } else {
-        pageLinks.each((_, link) => {
-          const linkHref = $(link).attr('href') || ''
-          const pageMatch = linkHref.match(/[?&]page=(\d+)/)
-          if (pageMatch) {
-            const pgNum = parseInt(pageMatch[1])
-            if (pgNum > pageCount) pageCount = pgNum
-          }
-        })
       }
     }
   }
   
-  if (pageCount < page) {
-    pageCount = page
-  }
+  if (pageCount < page) pageCount = page
   
   // 年份筛选
   const currentYear = new Date().getFullYear()
@@ -224,7 +250,6 @@ async function getCards(ext) {
     years.push({ n: String(y), v: String(y) })
   }
   
-  // 月份筛选
   const months = [{ n: '全部月份', v: '' }]
   for (let m = 1; m <= 12; m++) {
     months.push({ n: `${m}月`, v: String(m) })
@@ -237,25 +262,29 @@ async function getCards(ext) {
     limit: 30,
     total: cards.length,
     filter: [
-      {
-        key: 'year',
-        name: '年份',
-        init: '',
-        value: years,
-      },
-      {
-        key: 'month',
-        name: '月份',
-        init: '',
-        value: months,
-      },
+      { key: 'year', name: '年份', init: '', value: years },
+      { key: 'month', name: '月份', init: '', value: months },
     ],
   })
 }
 
 async function getTracks(ext) {
   ext = argsify(ext)
-  let url = ext.url || `${appConfig.site}/program_download-${ext.vid}.html`
+  
+  // 构建正确URL
+  let url = ext.url
+  if (!url) {
+    url = `/program_download-${ext.vid}.html`
+  }
+  if (!url.startsWith('http')) {
+    if (url.startsWith('//')) {
+      url = 'https:' + url
+    } else if (url.startsWith('/')) {
+      url = appConfig.site + url
+    } else {
+      url = appConfig.site + '/' + url
+    }
+  }
   
   console.log('获取详情页:', url)
   
@@ -265,37 +294,79 @@ async function getTracks(ext) {
     data = response.data
   } catch (error) {
     console.error('Track request error:', error)
-    $utils.toastError('获取详情失败')
+    $utils.toastError('获取详情失败: ' + error.message)
     return jsonify({ list: [] })
   }
   
-  if (data && data.includes('Just a moment...')) {
+  // 检查是否获取到有效数据
+  if (!data || data.length < 100) {
+    console.log('获取到的数据过少，可能请求失败')
+    $utils.toastError('页面获取失败')
+    return jsonify({ list: [] })
+  }
+  
+  if (data.includes('Just a moment...') || data.includes('Cloudflare')) {
     $utils.openSafari(url, UA)
     return jsonify({ list: [] })
   }
   
   const $ = cheerio.load(data)
   
-  // 提取原标题
-  let originalTitle = $('title').text().trim()
-  originalTitle = originalTitle.replace(/[-|]\s*LoveQ.*$/, '').trim()
-  if (!originalTitle) originalTitle = `节目${ext.vid}`
+  // ========== 提取标题（多种方式） ==========
+  let originalTitle = ''
   
-  // 提取发布日期和内容
+  // 方式1: 从title标签提取
+  const titleText = $('title').text().trim()
+  if (titleText) {
+    originalTitle = titleText.replace(/[-|]\s*LoveQ.*$/, '').replace(/节目下载[-\s]*/, '').trim()
+  }
+  
+  // 方式2: 从h1标签提取
+  if (!originalTitle) {
+    const h1Text = $('h1').first().text().trim()
+    if (h1Text) originalTitle = h1Text
+  }
+  
+  // 方式3: 从meta标签提取
+  if (!originalTitle) {
+    const ogTitle = $('meta[property="og:title"]').attr('content')
+    if (ogTitle) originalTitle = ogTitle
+  }
+  
+  // 方式4: 从页面内容提取（查找包含节目名字的段落）
+  if (!originalTitle) {
+    $('div[class*="title"], div[class*="name"], .pdl1 li:first-child').each((_, el) => {
+      const text = $(el).text().trim()
+      if (text && text.length > 3 && text.length < 100 && !text.includes('发布日期')) {
+        originalTitle = text
+        return false
+      }
+    })
+  }
+  
+  if (!originalTitle) {
+    originalTitle = `节目${ext.vid}`
+    console.log('未能提取标题，使用默认:', originalTitle)
+  }
+  
+  console.log('提取到标题:', originalTitle)
+  
+  // ========== 提取发布日期和内容 ==========
   let pubDate = ''
   let content = ''
   
-  $('ul.pdl1 li').each((_, li) => {
+  $('ul.pdl1 li, .info li, .detail li').each((_, li) => {
     const liText = $(li).text().trim()
-    if (liText.includes('发布日期：') || liText.includes('发布时间：')) {
-      const dateMatch = liText.match(/(\d{4}[-\/]\d{2}[-\/]\d{2})/)
+    if (liText.includes('发布日期') || liText.includes('发布时间')) {
+      const dateMatch = liText.match(/(\d{4}[-\/]\d{1,2}[-\/]\d{1,2})/)
       if (dateMatch) {
         pubDate = dateMatch[1]
       } else {
-        pubDate = liText.replace(/^(发布日期|发布时间)[：:]/, '').trim()
+        const datePart = liText.replace(/^(发布日期|发布时间)[：:]\s*/, '')
+        if (datePart.match(/\d/)) pubDate = datePart
       }
-    } else if (liText.includes('节目内容：') || liText.includes('内容简介：')) {
-      content = liText.replace(/^(节目内容|内容简介)[：:]/, '').trim()
+    } else if (liText.includes('节目内容') || liText.includes('内容简介')) {
+      content = liText.replace(/^(节目内容|内容简介)[：:]\s*/, '').trim()
     }
   })
   
@@ -305,22 +376,21 @@ async function getTracks(ext) {
   }
   
   if (!content) {
-    const contentDiv = $('div[class*="content"], div[class*="intro"], div[class*="desc"]')
-    if (contentDiv.length) {
-      content = contentDiv.text().trim().slice(0, 500)
-    }
+    $('div[class*="content"], div[class*="intro"], .pdl1 li:last-child').each((_, el) => {
+      const text = $(el).text().trim()
+      if (text.length > 20 && !text.includes('发布日期')) {
+        content = text.slice(0, 500)
+        return false
+      }
+    })
   }
   
-  if (!content || (content && /^\d{4}[-\/]\d{2}[-\/]\d{2}\s*$/.test(content))) {
-    content = '暂无节目简介'
-  }
+  if (!content) content = '暂无节目简介'
   
-  // 新标题格式
+  // 构建显示标题
   let vodName = originalTitle
-  if (pubDate) {
-    const formattedDate = pubDate.replace(/\//g, '-')
-    const contentPreview = content.length > 50 ? content.slice(0, 50) : content
-    vodName = `${formattedDate} - ${contentPreview}`
+  if (pubDate && pubDate.match(/\d{4}-\d{2}-\d{2}/)) {
+    vodName = `${pubDate} - ${originalTitle}`
   }
   
   const desc = pubDate ? `📅 发布日期：${pubDate}\n📝 ${content}` : content
@@ -328,67 +398,72 @@ async function getTracks(ext) {
   // ========== 提取音频链接 ==========
   let audioUrl = ''
   
-  // 方法1：匹配完整格式
-  const mp3Match = data.match(/https?:\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/i)
-  if (mp3Match) {
-    audioUrl = mp3Match[0]
-    console.log('方法1找到音频:', audioUrl)
-  }
+  // 方法1：匹配完整mp3链接
+  const mp3Patterns = [
+    /https?:\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/gi,
+    /https?:\/\/[^\s"']+\.mp3\?[^\s"']+/gi,
+    /\/\/dl2\.loveq\.cn:8090\/[^\s"']+\.mp3[^\s"']*/gi,
+  ]
   
-  // 方法2：匹配相对路径
-  if (!audioUrl) {
-    const relMatch = data.match(/\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/i)
-    if (relMatch) {
-      audioUrl = 'https:' + relMatch[0]
-      console.log('方法2找到音频:', audioUrl)
+  for (const pattern of mp3Patterns) {
+    const match = data.match(pattern)
+    if (match && match[0]) {
+      audioUrl = match[0]
+      if (audioUrl.startsWith('//')) audioUrl = 'https:' + audioUrl
+      console.log('找到音频链接:', audioUrl)
+      break
     }
   }
   
-  // 方法3：从audio标签提取
+  // 方法2：从audio/source标签提取
   if (!audioUrl) {
-    $('audio, source').each((_, tag) => {
+    $('audio source, audio, source[type="audio/mpeg"]').each((_, tag) => {
       let src = $(tag).attr('src') || ''
-      if (src && src.includes('dl2.loveq.cn') && src.includes('.mp3')) {
+      if (src && (src.includes('.mp3') || src.includes('dl2.loveq.cn'))) {
         if (src.startsWith('//')) src = 'https:' + src
         if (!audioUrl) audioUrl = src
       }
     })
-    if (audioUrl) console.log('方法3找到音频:', audioUrl)
   }
   
-  // 方法4：从script中提取
+  // 方法3：从script内容提取
   if (!audioUrl) {
-    const scriptMatch = data.match(/https?:\/\/[^\s"']+\.mp3\?[^\s"']+/gi)
-    if (scriptMatch) {
-      for (const link of scriptMatch) {
-        if (link.includes('dl2.loveq.cn')) {
-          audioUrl = link
-          console.log('方法4找到音频:', audioUrl)
+    $('script').each((_, script) => {
+      const scriptText = $(script).html() || ''
+      const match = scriptText.match(/https?:\/\/[^\s"']+\.mp3\?[^\s"']+/)
+      if (match) {
+        audioUrl = match[0]
+        return false
+      }
+    })
+  }
+  
+  // 封面图片
+  let vodPic = appConfig.defaultPic
+  if (originalTitle.includes('得闲')) {
+    vodPic = appConfig.dexianPic
+  } else {
+    const imgSelectors = ['img[class*="cover"]', 'img[class*="poster"]', 'img[class*="pic"]', '.pdl1 img', '.content img']
+    for (const selector of imgSelectors) {
+      const imgTag = $(selector).first()
+      if (imgTag.length && imgTag.attr('src')) {
+        let imgSrc = imgTag.attr('src')
+        if (imgSrc.startsWith('//')) imgSrc = 'https:' + imgSrc
+        else if (imgSrc.startsWith('/')) imgSrc = appConfig.site + imgSrc
+        if (imgSrc.startsWith('http')) {
+          vodPic = imgSrc
           break
         }
       }
     }
   }
   
-  // 封面图片
-  let vodPic = appConfig.defaultPic
-  if (originalTitle.includes('得闲小叙') || originalTitle.includes('得闲')) {
-    vodPic = appConfig.dexianPic
-  } else {
-    const imgTag = $('img[class*="cover"], img[class*="poster"], img[class*="pic"]')
-    if (imgTag.length && imgTag.attr('src')) {
-      let imgSrc = imgTag.attr('src')
-      vodPic = imgSrc.startsWith('http') ? imgSrc : appConfig.site + imgSrc
-    }
-  }
-  
   if (!audioUrl) {
-    console.log('未找到音频链接')
+    console.log('未找到音频链接，页面长度:', data.length)
     $utils.toastError('未找到音频链接')
     return jsonify({ list: [] })
   }
   
-  // 返回播放地址
   return jsonify({
     list: [{
       vod_id: ext.vid,
@@ -403,22 +478,22 @@ async function getTracks(ext) {
 async function searchContent(key, quick, pg = '1') {
   const encodedKey = encodeURIComponent(key)
   const searchUrls = [
-    `${appConfig.site}/so-${pg}-${encodedKey}.html`,
-    `${appConfig.site}/so.html?wd=${encodedKey}&page=${pg}`,
-    `${appConfig.site}/search.php?keyword=${encodedKey}&page=${pg}`,
+    `/so-${pg}-${encodedKey}.html`,
+    `/so.html?wd=${encodedKey}&page=${pg}`,
+    `/search.php?keyword=${encodedKey}&page=${pg}`,
   ]
   
   let data = null
   for (const url of searchUrls) {
     try {
       const response = await request(url)
-      if (response && response.data) {
+      if (response && response.data && response.data.length > 100) {
         data = response.data
         console.log('搜索成功:', url)
         break
       }
     } catch(e) {
-      console.log('搜索请求失败:', url, e.message)
+      console.log('搜索失败:', url, e.message)
     }
   }
   
@@ -444,10 +519,7 @@ async function searchContent(key, quick, pg = '1') {
           vod_name: title,
           vod_pic: appConfig.defaultPic,
           vod_remarks: '搜索结果',
-          ext: {
-            vid: vid,
-            url: href,
-          },
+          ext: { vid: vid, url: href },
         })
       }
     }
