@@ -7,403 +7,361 @@ async function getLocalInfo() {
   return jsonify(appConfig)
 }
 
-const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko) Version/18.2 Mobile/15E148 Safari/604.1'
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 const cheerio = createCheerio()
 
-let $config = argsify($config_str)
-
 const appConfig = {
-  ver: 1,
-  title: 'LoveQ',
-  site: 'https://www.loveq.cn',
-  defaultPic: 'https://www.loveq.cn/themes/loveq/loveautumn/appimg/qr-code.gif?20180304.gif',
-  dexianPic: 'https://www.loveq.cn/themes/loveq/loveautumn/appimg/qr-code.gif?20180304.gif',
-  filterCategories: ["盛世乾坤", "一些事一些情", "一些事一些情精华剪辑"],
-}
-
-async function getCategories() {
-  const url = appConfig.site + '/program.html'
-  const { data } = await $fetch.get(url, {
-    headers: {
-      'User-Agent': UA,
-    },
-  })
-  
-  if (data && data.includes('Just a moment...')) {
-    $utils.openSafari(url, UA)
-    return []
-  }
-  
-  const $ = cheerio.load(data)
-  const categories = []
-  const seen = new Set()
-  
-  $('a[href]').each((_, e) => {
-    const href = $(e).attr('href')
-    const title = $(e).text().trim()
-    
-    const catMatch = href && href.match(/program-cat(\d+)-p\d+\.html/)
-    if (catMatch && title && !appConfig.filterCategories.includes(title)) {
-      const catId = catMatch[1]
-      if (catId !== '0' && !seen.has(catId)) {
-        seen.add(catId)
-        categories.push({
-          type_name: title,
-          type_id: catId
-        })
-      }
-    }
-  })
-  
-  categories.sort((a, b) => parseInt(a.type_id) - parseInt(b.type_id))
-  return categories
+    ver: 1,
+    title: 'LoveQ',
+    site: 'https://www.loveq.cn',
+    default_pic: 'https://raw.githubusercontent.com/zcl668/videos-bak/main/loveq2026.jpg',
+    dexian_pic: 'https://raw.githubusercontent.com/zcl668/videos-bak/main/loveq2026.jpg',
+    filter_categories: ["盛世乾坤", "一些事一些情", "一些事一些情精华剪辑"]
 }
 
 async function getConfig() {
-  let config = { ...appConfig }
-  const categories = await getCategories()
-  
-  config.tabs = categories.map(cat => ({
-    name: cat.type_name,
-    ui: 1,
-    ext: {
-      id: cat.type_id,
-    },
-  }))
-  
-  return jsonify(config)
+    let config = { ...appConfig };
+    const html = await get(`${appConfig.site}/program.html`);
+    if (html) {
+        const $ = cheerio.load(html);
+        const tabs = [];
+        const seen = new Set();
+        
+        $('a[href]').each((_, el) => {
+            const href = $(el).attr('href');
+            const title = $(el).text().trim();
+            const catMatch = href.match(/program-cat(\d+)-p\d+\.html/);
+            
+            if (catMatch && title && !appConfig.filter_categories.includes(title)) {
+                const catId = catMatch[1];
+                if (catId !== "0" && !seen.has(catId)) {
+                    seen.add(catId);
+                    tabs.push({
+                        name: title,
+                        ui: 1,
+                        ext: {
+                            id: catId,
+                        }
+                    });
+                }
+            }
+        });
+        
+        tabs.sort((a, b) => parseInt(a.ext.id) - parseInt(b.ext.id));
+        config.tabs = tabs;
+    }
+    return jsonify(config);
 }
 
 async function getCards(ext) {
-  ext = argsify(ext)
-  let cards = []
-  let { page = 1, id, filters = {} } = ext
-  
-  let url = appConfig.site + `/program.html?cat_id=${id}&page=${page}`
-  
-  if (filters.year && filters.year !== '') {
-    url += `&year=${encodeURIComponent(filters.year)}`
-  }
-  if (filters.month && filters.month !== '') {
-    url += `&month=${encodeURIComponent(filters.month)}`
-  }
-  
-  console.log('Requesting:', url)
-  
-  const { data } = await $fetch.get(url, {
-    headers: {
-      'User-Agent': UA,
-    },
-  })
-  
-  if (data && data.includes('Just a moment...')) {
-    $utils.openSafari(url, UA)
-    return jsonify({ list: [], page: 1, pagecount: 1, limit: 30, total: 0 })
-  }
-  
-  const $ = cheerio.load(data)
-  
-  $('a[href*="program_download"]').each((_, e) => {
-    const href = $(e).attr('href')
-    let title = $(e).text().trim()
+    ext = argsify(ext);
+    let cards = [];
+    let { page = 1, id, filters = {} } = ext;
     
-    if (!title || title.length < 2) return
+    const params = new URLSearchParams();
+    params.append('cat_id', id);
+    params.append('page', page);
+    if (filters.year) params.append('year', filters.year);
+    if (filters.month) params.append('month', filters.month);
     
-    const vidMatch = href && href.match(/program_download-?(\d+)\.html/)
-    if (vidMatch) {
-      const vid = vidMatch[1]
-      
-      let pic = appConfig.defaultPic
-      const imgTag = $(e).find('img')
-      if (imgTag.length && imgTag.attr('src')) {
-        let imgSrc = imgTag.attr('src')
-        if (imgSrc.startsWith('http')) {
-          pic = imgSrc
-        } else {
-          pic = appConfig.site + imgSrc
+    const url = `${appConfig.site}/program.html?${params.toString()}`;
+    const html = await get(url);
+    if (!html) return jsonify({ list: [] });
+    
+    const $ = cheerio.load(html);
+    
+    $('a[href*="program_download"]').each((_, el) => {
+        const href = $(el).attr('href');
+        let title = $(el).text().trim();
+        if (!title || title.length < 2) return;
+        
+        const vidMatch = href.match(/program_download-?(\d+)\.html/);
+        if (vidMatch) {
+            const vid = vidMatch[1];
+            let pic = appConfig.default_pic;
+            const img = $(el).find('img');
+            if (img.length && img.attr('src')) {
+                let imgSrc = img.attr('src');
+                pic = imgSrc.startsWith('http') ? imgSrc : appConfig.site + imgSrc;
+            }
+            
+            let remark = '';
+            const parent = $(el).closest('li');
+            if (parent.length) {
+                const dateSpan = parent.find('span[class*="date"], span[class*="time"]');
+                if (dateSpan.length) remark = dateSpan.text().trim();
+            }
+            
+            cards.push({
+                vod_id: vid,
+                vod_name: title,
+                vod_pic: pic,
+                vod_remarks: remark,
+                ext: {
+                    url: `${appConfig.site}/program_download-${vid}.html`,
+                }
+            });
         }
-      }
-      
-      let remark = ''
-      const parent = $(e).closest('li, div[class*="item"], div[class*="entry"]')
-      if (parent.length) {
-        const dateSpan = parent.find('span[class*="date"], span[class*="time"]')
-        if (dateSpan.length) {
-          remark = dateSpan.text().trim()
+    });
+    
+    let pageCount = 1;
+    const pagination = $('div[class*="page"], div[class*="pagination"]');
+    if (pagination.length) {
+        const pageLinks = pagination.find('a');
+        if (pageLinks.length) {
+            const lastPage = pageLinks.length >= 2 ? pageLinks.eq(-2) : pageLinks.eq(-1);
+            const pageText = lastPage.text().trim();
+            if (/^\d+$/.test(pageText)) {
+                pageCount = parseInt(pageText);
+            }
         }
-      }
-      
-      cards.push({
-        vod_id: vid,
-        vod_name: title,
-        vod_pic: pic,
-        vod_remarks: remark,
-        ext: {
-          url: href,
-          vid: vid,
-        },
-      })
     }
-  })
-  
-  // 计算总页数
-  let pageCount = 1
-  const pagination = $('div[class*="page"], div[class*="pagination"]')
-  if (pagination.length) {
-    const pageLinks = pagination.find('a')
-    if (pageLinks.length) {
-      const lastPage = pageLinks.length >= 2 ? pageLinks.eq(-2) : pageLinks.eq(-1)
-      const pageText = lastPage.text().trim()
-      if (/^\d+$/.test(pageText)) {
-        pageCount = parseInt(pageText)
-      } else {
-        pageLinks.each((_, link) => {
-          const linkHref = $(link).attr('href') || ''
-          const pageMatch = linkHref.match(/[?&]page=(\d+)/)
-          if (pageMatch) {
-            const pgNum = parseInt(pageMatch[1])
-            if (pgNum > pageCount) pageCount = pgNum
-          }
-        })
-      }
-    }
-  }
-  
-  if (pageCount < page) {
-    pageCount = page
-  }
-  
-  // 年份筛选
-  const currentYear = new Date().getFullYear()
-  const years = [{ n: '全部年份', v: '' }]
-  for (let y = currentYear; y > 2012; y--) {
-    years.push({ n: String(y), v: String(y) })
-  }
-  
-  // 月份筛选
-  const months = [{ n: '全部月份', v: '' }]
-  for (let m = 1; m <= 12; m++) {
-    months.push({ n: `${m}月`, v: String(m) })
-  }
-  
-  return jsonify({
-    list: cards,
-    page: parseInt(page),
-    pagecount: pageCount,
-    limit: 30,
-    total: cards.length,
-    filter: [
-      {
-        key: 'year',
-        name: '年份',
-        init: '',
-        value: years,
-      },
-      {
-        key: 'month',
-        name: '月份',
-        init: '',
-        value: months,
-      },
-    ],
-  })
+    
+    return jsonify({
+        list: cards,
+        page: parseInt(page),
+        pagecount: pageCount,
+        limit: 30,
+        total: cards.length,
+        filter: [
+            {
+                key: 'year',
+                name: '年份',
+                init: '',
+                value: (() => {
+                    const currentYear = new Date().getFullYear();
+                    const years = [{ n: '全部年份', v: '' }];
+                    for (let y = currentYear; y > 2002; y--) {
+                        years.push({ n: String(y), v: String(y) });
+                    }
+                    return years;
+                })()
+            },
+            {
+                key: 'month',
+                name: '月份',
+                init: '',
+                value: (() => {
+                    const months = [{ n: '全部月份', v: '' }];
+                    for (let m = 1; m <= 12; m++) {
+                        months.push({ n: `${m}月`, v: String(m) });
+                    }
+                    return months;
+                })()
+            }
+        ]
+    });
 }
 
 async function getTracks(ext) {
-  ext = argsify(ext)
-  let url = ext.url || `${appConfig.site}/program_download-${ext.vid}.html`
-  
-  console.log('获取详情页:', url)
-  
-  const { data } = await $fetch.get(url, {
-    headers: {
-      'User-Agent': UA,
-    },
-  })
-  
-  if (data && data.includes('Just a moment...')) {
-    $utils.openSafari(url, UA)
-    return jsonify({ list: [] })
-  }
-  
-  const $ = cheerio.load(data)
-  
-  // 提取原标题
-  let originalTitle = $('title').text().trim()
-  originalTitle = originalTitle.replace(/[-|]\s*LoveQ.*$/, '').trim()
-  if (!originalTitle) originalTitle = `节目${ext.vid}`
-  
-  // 提取发布日期和内容
-  let pubDate = ''
-  let content = ''
-  
-  $('ul.pdl1 li').each((_, li) => {
-    const liText = $(li).text().trim()
-    if (liText.includes('发布日期：') || liText.includes('发布时间：')) {
-      const dateMatch = liText.match(/(\d{4}[-\/]\d{2}[-\/]\d{2})/)
-      if (dateMatch) {
-        pubDate = dateMatch[1]
-      } else {
-        pubDate = liText.replace(/^(发布日期|发布时间)[：:]/, '').trim()
-      }
-    } else if (liText.includes('节目内容：') || liText.includes('内容简介：')) {
-      content = liText.replace(/^(节目内容|内容简介)[：:]/, '').trim()
+    ext = argsify(ext);
+    const url = ext.url;
+    
+    const html = await get(url);
+    if (!html) return jsonify({ list: [] });
+    
+    const $ = cheerio.load(html);
+    
+    // 提取vid
+    const vidMatch = url.match(/program_download-?(\d+)\.html/);
+    const vid = vidMatch ? vidMatch[1] : '';
+    
+    // 提取标题
+    let originalTitle = '';
+    const titleTag = $('title');
+    if (titleTag.length) {
+        originalTitle = titleTag.text().trim();
+        originalTitle = originalTitle.replace(/[-|]\s*LoveQ.*$/, '').trim();
     }
-  })
-  
-  if (!content) {
-    const metaDesc = $('meta[name="description"]').attr('content')
-    if (metaDesc) content = metaDesc
-  }
-  
-  if (!content) {
-    const contentDiv = $('div[class*="content"], div[class*="intro"], div[class*="desc"]')
-    if (contentDiv.length) {
-      content = contentDiv.text().trim().slice(0, 500)
+    if (!originalTitle) originalTitle = `节目${vid}`;
+    
+    // 提取发布日期和内容
+    let pubDate = '';
+    let content = '';
+    const pdl1List = $('ul.pdl1');
+    if (pdl1List.length) {
+        pdl1List.find('li').each((_, li) => {
+            const liText = $(li).text().trim();
+            if (liText.includes('发布日期：') || liText.includes('发布时间：')) {
+                const dateMatch = liText.match(/(\d{4}[-\/]\d{2}[-\/]\d{2})/);
+                if (dateMatch) {
+                    pubDate = dateMatch[1];
+                } else {
+                    pubDate = liText.replace(/^(发布日期|发布时间)[：:]/, '').trim();
+                }
+            } else if (liText.includes('节目内容：') || liText.includes('内容简介：')) {
+                content = liText.replace(/^(节目内容|内容简介)[：:]/, '').trim();
+            }
+        });
     }
-  }
-  
-  if (!content || (content && /^\d{4}[-\/]\d{2}[-\/]\d{2}\s*$/.test(content))) {
-    content = '暂无节目简介'
-  }
-  
-  // 新标题格式
-  let vodName = originalTitle
-  if (pubDate) {
-    const formattedDate = pubDate.replace(/\//g, '-')
-    const contentPreview = content.length > 50 ? content.slice(0, 50) : content
-    vodName = `${formattedDate} - ${contentPreview}`
-  }
-  
-  const desc = pubDate ? `📅 发布日期：${pubDate}\n📝 ${content}` : content
-  
-  // ========== 提取音频链接 ==========
-  let audioUrl = ''
-  
-  // 方法1：匹配完整格式
-  const mp3Match = data.match(/https?:\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/i)
-  if (mp3Match) {
-    audioUrl = mp3Match[0]
-    console.log('方法1找到音频:', audioUrl)
-  }
-  
-  // 方法2：匹配相对路径
-  if (!audioUrl) {
-    const relMatch = data.match(/\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/i)
-    if (relMatch) {
-      audioUrl = 'https:' + relMatch[0]
-      console.log('方法2找到音频:', audioUrl)
-    }
-  }
-  
-  // 方法3：从audio标签提取
-  if (!audioUrl) {
-    $('audio, source').each((_, tag) => {
-      let src = $(tag).attr('src') || ''
-      if (src && src.includes('dl2.loveq.cn') && src.includes('.mp3')) {
-        if (src.startsWith('//')) src = 'https:' + src
-        if (!audioUrl) audioUrl = src
-      }
-    })
-    if (audioUrl) console.log('方法3找到音频:', audioUrl)
-  }
-  
-  // 方法4：从script中提取
-  if (!audioUrl) {
-    const scriptMatch = data.match(/https?:\/\/[^\s"']+\.mp3\?[^\s"']+/gi)
-    if (scriptMatch) {
-      for (const link of scriptMatch) {
-        if (link.includes('dl2.loveq.cn')) {
-          audioUrl = link
-          console.log('方法4找到音频:', audioUrl)
-          break
+    
+    if (!content) {
+        const metaDesc = $('meta[name="description"]');
+        if (metaDesc.length && metaDesc.attr('content')) {
+            content = metaDesc.attr('content');
         }
-      }
     }
-  }
-  
-  // 封面图片
-  let vodPic = appConfig.defaultPic
-  if (originalTitle.includes('得闲小叙') || originalTitle.includes('得闲')) {
-    vodPic = appConfig.dexianPic
-  } else {
-    const imgTag = $('img[class*="cover"], img[class*="poster"], img[class*="pic"]')
-    if (imgTag.length && imgTag.attr('src')) {
-      let imgSrc = imgTag.attr('src')
-      vodPic = imgSrc.startsWith('http') ? imgSrc : appConfig.site + imgSrc
+    if (!content) content = "暂无节目简介";
+    
+    // 构建标题
+    let newTitle = originalTitle;
+    if (pubDate) {
+        const formattedDate = pubDate.replace(/\//g, '-');
+        const contentPreview = content.length > 50 ? content.slice(0, 50) : content;
+        newTitle = `${formattedDate} - ${contentPreview}`;
     }
-  }
-  
-  if (!audioUrl) {
-    console.log('未找到音频链接')
-    $utils.toastError('未找到音频链接')
-    return jsonify({ list: [] })
-  }
-  
-  // 返回播放地址
-  return jsonify({
-    list: [{
-      vod_id: ext.vid,
-      vod_name: vodName,
-      vod_pic: vodPic,
-      vod_content: desc,
-      vod_play_url: audioUrl,
-    }],
-  })
+    
+    const desc = pubDate ? `📅 发布日期：${pubDate}\n📝 ${content}` : content;
+    
+    // ========== 只保留线路12的音频链接 ==========
+    const audioLinks = [];
+    
+    // 线路12: dl2.loveq.cn
+    const pattern = /https?:\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/gi;
+    let match;
+    while ((match = pattern.exec(html)) !== null) {
+        audioLinks.push(match[0]);
+    }
+    
+    // 协议相对路径
+    const patternRel = /\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/gi;
+    while ((match = patternRel.exec(html)) !== null) {
+        audioLinks.push('https:' + match[0]);
+    }
+    
+    // 从audio/source标签提取
+    $('audio, source').each((_, tag) => {
+        const src = $(tag).attr('src');
+        if (src && src.includes('dl2.loveq.cn') && src.includes('.mp3?')) {
+            audioLinks.push(src);
+        }
+    });
+    
+    // 去重
+    const validLinks = [...new Set(audioLinks)];
+    
+    // 构建tracks
+    const tracks = [];
+    if (validLinks.length > 0) {
+        validLinks.forEach((link, idx) => {
+            tracks.push({
+                name: `线路12 - 音频${idx + 1}`,
+                pan: '',
+                ext: {
+                    url: link
+                }
+            });
+        });
+    } else {
+        tracks.push({
+            name: '暂无可用音频',
+            pan: '',
+            ext: { url: '' }
+        });
+    }
+    
+    // 判断封面
+    let vodPic = appConfig.default_pic;
+    if (originalTitle.includes("得闲小叙") || originalTitle.includes("得闲")) {
+        vodPic = appConfig.dexian_pic;
+    } else {
+        const imgTag = $('img[class*="cover"], img[class*="poster"], img[class*="pic"]');
+        if (imgTag.length && imgTag.attr('src')) {
+            let imgSrc = imgTag.attr('src');
+            vodPic = imgSrc.startsWith('http') ? imgSrc : appConfig.site + imgSrc;
+        }
+    }
+    
+    return jsonify({
+        list: [{
+            title: newTitle,
+            pic: vodPic,
+            desc: desc,
+            tracks: [{
+                name: '线路12',
+                tracks: tracks
+            }]
+        }]
+    });
 }
 
-async function searchContent(key, quick, pg = '1') {
-  const encodedKey = encodeURIComponent(key)
-  const searchUrls = [
-    `${appConfig.site}/so-${pg}-${encodedKey}.html`,
-    `${appConfig.site}/so.html?wd=${encodedKey}&page=${pg}`,
-    `${appConfig.site}/search.php?keyword=${encodedKey}&page=${pg}`,
-  ]
-  
-  let data = null
-  for (const url of searchUrls) {
+async function getPlayinfo(ext) {
+    ext = argsify(ext);
+    const url = ext.url;
+    
+    const headers = {
+        'User-Agent': UA,
+        'Referer': appConfig.site + '/',
+        'Origin': appConfig.site,
+        'Accept': 'audio/webm,audio/ogg,audio/wav,audio/*;q=0.9',
+        'Range': 'bytes=0-'
+    };
+    
+    return jsonify({
+        urls: [url],
+        headers: [headers]
+    });
+}
+
+async function search(ext) {
+    ext = argsify(ext);
+    let cards = [];
+    let text = encodeURIComponent(ext.text);
+    let page = ext.page || 1;
+    
+    const searchUrls = [
+        `${appConfig.site}/so-${page}-${text}.html`,
+        `${appConfig.site}/so.html?wd=${text}&page=${page}`,
+        `${appConfig.site}/search.php?keyword=${text}&page=${page}`
+    ];
+    
+    let html = '';
+    for (const url of searchUrls) {
+        html = await get(url);
+        if (html) break;
+    }
+    
+    if (!html) return jsonify({ list: [] });
+    
+    const $ = cheerio.load(html);
+    const seenIds = new Set();
+    
+    $('a[href*="program_download"]').each((_, el) => {
+        const href = $(el).attr('href');
+        const title = $(el).text().trim();
+        if (!title || title.length < 2) return;
+        
+        const vidMatch = href.match(/program_download-?(\d+)\.html/);
+        if (vidMatch) {
+            const vid = vidMatch[1];
+            const searchText = ext.text.toLowerCase();
+            
+            if (title.toLowerCase().includes(searchText) && !seenIds.has(vid)) {
+                seenIds.add(vid);
+                cards.push({
+                    vod_id: vid,
+                    vod_name: title,
+                    vod_pic: appConfig.default_pic,
+                    vod_remarks: "搜索结果",
+                    ext: {
+                        url: `${appConfig.site}/program_download-${vid}.html`,
+                    }
+                });
+            }
+        }
+    });
+    
+    return jsonify({ list: cards });
+}
+
+async function get(url) {
     try {
-      const resp = await $fetch.get(url, {
-        headers: { 'User-Agent': UA },
-      })
-      if (resp && resp.data) {
-        data = resp.data
-        break
-      }
-    } catch(e) {
-      console.log('搜索请求失败:', url)
+        const response = await $fetch.get(url, {
+            headers: { 'User-Agent': UA }
+        });
+        return response.data;
+    } catch (e) {
+        console.log(`请求失败: ${e.message}, URL: ${url}`);
+        return '';
     }
-  }
-  
-  if (!data) return jsonify({ list: [] })
-  
-  const $ = cheerio.load(data)
-  const results = []
-  const seenIds = new Set()
-  
-  $('a[href*="program_download"]').each((_, e) => {
-    const href = $(e).attr('href')
-    const title = $(e).text().trim()
-    
-    if (!title || title.length < 2) return
-    
-    const vidMatch = href && href.match(/program_download-?(\d+)\.html/)
-    if (vidMatch) {
-      const vid = vidMatch[1]
-      if (title.toLowerCase().includes(key.toLowerCase()) && !seenIds.has(vid)) {
-        seenIds.add(vid)
-        results.push({
-          vod_id: vid,
-          vod_name: title,
-          vod_pic: appConfig.defaultPic,
-          vod_remarks: '搜索结果',
-          ext: {
-            vid: vid,
-          },
-        })
-      }
-    }
-  })
-  
-  return jsonify({ list: results })
 }
