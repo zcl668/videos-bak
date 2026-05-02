@@ -348,7 +348,24 @@ async function getTracks(ext) {
       vod_pic: vodPic,
       vod_content: desc,
       vod_play_url: audioUrl,
+      ext: {
+        url: audioUrl,
+      },
     }],
+  })
+}
+
+// 新增：getPlayinfo 函数，解决播放提示不支持的URL的问题
+async function getPlayinfo(ext) {
+  ext = argsify(ext)
+  const url = ext.url
+
+  return jsonify({
+    urls: [url],
+    headers: [{
+      'User-Agent': UA,
+      'Referer': appConfig.site
+    }]
   })
 }
 
