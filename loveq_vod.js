@@ -21,6 +21,8 @@ const appConfig = {
 
 async function getConfig() {
     let config = { ...appConfig };
+    
+    // 获取分类列表作为 tabs
     const html = await get(`${appConfig.site}/program.html`);
     if (html) {
         const $ = cheerio.load(html);
@@ -41,6 +43,7 @@ async function getConfig() {
                         ui: 1,
                         ext: {
                             id: catId,
+                            type: 'category'
                         }
                     });
                 }
@@ -48,23 +51,39 @@ async function getConfig() {
         });
         
         tabs.sort((a, b) => parseInt(a.ext.id) - parseInt(b.ext.id));
+        
+        // 添加搜索 tab
+        tabs.unshift({
+            name: '🔍 搜索',
+            ui: 2,
+            ext: { type: 'search' }
+        });
+        
         config.tabs = tabs;
     }
+    
     return jsonify(config);
 }
 
 async function getCards(ext) {
     ext = argsify(ext);
     let cards = [];
-    let { page = 1, id, filters = {} } = ext;
+    let { page = 1, id, type, filters = {} } = ext;
+    
+    if (type === 'search') {
+        return jsonify({ list: [] });
+    }
     
     const params = new URLSearchParams();
     params.append('cat_id', id);
     params.append('page', page);
+    
     if (filters.year) params.append('year', filters.year);
     if (filters.month) params.append('month', filters.month);
     
     const url = `${appConfig.site}/program.html?${params.toString()}`;
+    console.log('Requesting:', url);
+    
     const html = await get(url);
     if (!html) return jsonify({ list: [] });
     
@@ -73,23 +92,31 @@ async function getCards(ext) {
     $('a[href*="program_download"]').each((_, el) => {
         const href = $(el).attr('href');
         let title = $(el).text().trim();
+        
         if (!title || title.length < 2) return;
         
         const vidMatch = href.match(/program_download-?(\d+)\.html/);
         if (vidMatch) {
             const vid = vidMatch[1];
+            
             let pic = appConfig.default_pic;
             const img = $(el).find('img');
             if (img.length && img.attr('src')) {
                 let imgSrc = img.attr('src');
-                pic = imgSrc.startsWith('http') ? imgSrc : appConfig.site + imgSrc;
+                if (imgSrc.startsWith('http')) {
+                    pic = imgSrc;
+                } else {
+                    pic = appConfig.site + imgSrc;
+                }
             }
             
             let remark = '';
             const parent = $(el).closest('li');
             if (parent.length) {
                 const dateSpan = parent.find('span[class*="date"], span[class*="time"]');
-                if (dateSpan.length) remark = dateSpan.text().trim();
+                if (dateSpan.length) {
+                    remark = dateSpan.text().trim();
+                }
             }
             
             cards.push({
@@ -99,6 +126,7 @@ async function getCards(ext) {
                 vod_remarks: remark,
                 ext: {
                     url: `${appConfig.site}/program_download-${vid}.html`,
+                    vid: vid
                 }
             });
         }
@@ -113,13 +141,26 @@ async function getCards(ext) {
             const pageText = lastPage.text().trim();
             if (/^\d+$/.test(pageText)) {
                 pageCount = parseInt(pageText);
+            } else {
+                pageLinks.each((_, link) => {
+                    const href = $(link).attr('href');
+                    const pageMatch = href.match(/[?&]page=(\d+)/);
+                    if (pageMatch) {
+                        const pgNum = parseInt(pageMatch[1]);
+                        if (pgNum > pageCount) pageCount = pgNum;
+                    }
+                });
             }
         }
     }
     
+    if (pageCount <= page && cards.length > 0) {
+        pageCount = page + 1;
+    }
+    
     return jsonify({
         list: cards,
-        page: parseInt(page),
+        page: page,
         pagecount: pageCount,
         limit: 30,
         total: cards.length,
@@ -156,17 +197,13 @@ async function getCards(ext) {
 async function getTracks(ext) {
     ext = argsify(ext);
     const url = ext.url;
+    const vid = ext.vid;
     
     const html = await get(url);
     if (!html) return jsonify({ list: [] });
     
     const $ = cheerio.load(html);
     
-    // 提取vid
-    const vidMatch = url.match(/program_download-?(\d+)\.html/);
-    const vid = vidMatch ? vidMatch[1] : '';
-    
-    // 提取标题
     let originalTitle = '';
     const titleTag = $('title');
     if (titleTag.length) {
@@ -175,9 +212,9 @@ async function getTracks(ext) {
     }
     if (!originalTitle) originalTitle = `节目${vid}`;
     
-    // 提取发布日期和内容
     let pubDate = '';
     let content = '';
+    
     const pdl1List = $('ul.pdl1');
     if (pdl1List.length) {
         pdl1List.find('li').each((_, li) => {
@@ -201,9 +238,20 @@ async function getTracks(ext) {
             content = metaDesc.attr('content');
         }
     }
-    if (!content) content = "暂无节目简介";
     
-    // 构建标题
+    if (!content) {
+        const contentDiv = $('div[class*="content"], div[class*="intro"], div[class*="desc"]');
+        if (contentDiv.length) {
+            content = contentDiv.text().trim().slice(0, 500);
+        }
+    }
+    
+    if (content && /^\d{4}[-\/]\d{2}[-\/]\d{2}\s*$/.test(content)) {
+        content = "暂无节目简介";
+    } else if (!content) {
+        content = "暂无节目简介";
+    }
+    
     let newTitle = originalTitle;
     if (pubDate) {
         const formattedDate = pubDate.replace(/\//g, '-');
@@ -213,54 +261,37 @@ async function getTracks(ext) {
     
     const desc = pubDate ? `📅 发布日期：${pubDate}\n📝 ${content}` : content;
     
-    // ========== 只保留线路12的音频链接 ==========
+    // 线路12：提取音频链接
     const audioLinks = [];
-    
-    // 线路12: dl2.loveq.cn
     const pattern = /https?:\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/gi;
     let match;
     while ((match = pattern.exec(html)) !== null) {
         audioLinks.push(match[0]);
     }
     
-    // 协议相对路径
     const patternRel = /\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/gi;
     while ((match = patternRel.exec(html)) !== null) {
         audioLinks.push('https:' + match[0]);
     }
     
-    // 从audio/source标签提取
     $('audio, source').each((_, tag) => {
         const src = $(tag).attr('src');
-        if (src && src.includes('dl2.loveq.cn') && src.includes('.mp3?')) {
+        if (src && src.includes('dl2.loveq.cn') && /\.mp3\?/.test(src) && src.includes('sign=') && src.includes('timestamp=')) {
             audioLinks.push(src);
         }
     });
     
-    // 去重
     const validLinks = [...new Set(audioLinks)];
     
-    // 构建tracks
-    const tracks = [];
+    let playUrl = "暂无音频";
     if (validLinks.length > 0) {
-        validLinks.forEach((link, idx) => {
-            tracks.push({
-                name: `线路12 - 音频${idx + 1}`,
-                pan: '',
-                ext: {
-                    url: link
-                }
-            });
-        });
-    } else {
-        tracks.push({
-            name: '暂无可用音频',
-            pan: '',
-            ext: { url: '' }
-        });
+        if (validLinks.length > 1) {
+            playUrl = validLinks.map((link, i) => `线路12$${link}`).join('$$$');
+        } else {
+            playUrl = `线路12$${validLinks[0]}`;
+        }
     }
     
-    // 判断封面
     let vodPic = appConfig.default_pic;
     if (originalTitle.includes("得闲小叙") || originalTitle.includes("得闲")) {
         vodPic = appConfig.dexian_pic;
@@ -268,7 +299,11 @@ async function getTracks(ext) {
         const imgTag = $('img[class*="cover"], img[class*="poster"], img[class*="pic"]');
         if (imgTag.length && imgTag.attr('src')) {
             let imgSrc = imgTag.attr('src');
-            vodPic = imgSrc.startsWith('http') ? imgSrc : appConfig.site + imgSrc;
+            if (imgSrc.startsWith('http')) {
+                vodPic = imgSrc;
+            } else {
+                vodPic = appConfig.site + imgSrc;
+            }
         }
     }
     
@@ -279,7 +314,11 @@ async function getTracks(ext) {
             desc: desc,
             tracks: [{
                 name: '线路12',
-                tracks: tracks
+                tracks: validLinks.map((link, idx) => ({
+                    name: `音频 ${idx + 1}`,
+                    pan: '',
+                    ext: { url: link }
+                }))
             }]
         }]
     });
@@ -329,6 +368,7 @@ async function search(ext) {
     $('a[href*="program_download"]').each((_, el) => {
         const href = $(el).attr('href');
         const title = $(el).text().trim();
+        
         if (!title || title.length < 2) return;
         
         const vidMatch = href.match(/program_download-?(\d+)\.html/);
@@ -345,6 +385,7 @@ async function search(ext) {
                     vod_remarks: "搜索结果",
                     ext: {
                         url: `${appConfig.site}/program_download-${vid}.html`,
+                        vid: vid
                     }
                 });
             }
