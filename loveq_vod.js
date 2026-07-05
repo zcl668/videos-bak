@@ -269,15 +269,18 @@ async function getTracks(ext) {
     
     const desc = pubDate ? `📅 发布日期：${pubDate}\n📝 ${content}` : content;
     
-    // 提取音频链接
+    // 提取音频链接 - 完整格式匹配（与Python保持一致）
     const audioLinks = [];
+    
+    // 匹配完整格式的音频链接（忽略大小写）
+    // 格式: https://dl2.loveq.cn:8090/live/program/2017/1500229358423534874.mp3?sign=xxx&timestamp=xxx
     const pattern = /https?:\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/gi;
     let match;
     while ((match = pattern.exec(html)) !== null) {
         audioLinks.push(match[0]);
     }
     
-    // 协议相对路径
+    // 匹配协议相对路径的版本
     const patternRel = /\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/gi;
     while ((match = patternRel.exec(html)) !== null) {
         audioLinks.push('https:' + match[0]);
@@ -287,7 +290,12 @@ async function getTracks(ext) {
     $('audio, source').each((_, tag) => {
         const src = $(tag).attr('src');
         if (src && src.includes('dl2.loveq.cn') && /\.mp3\?/.test(src) && src.includes('sign=') && src.includes('timestamp=')) {
-            audioLinks.push(src);
+            // 确保链接以 https: 开头
+            if (src.startsWith('//')) {
+                audioLinks.push('https:' + src);
+            } else if (src.startsWith('http')) {
+                audioLinks.push(src);
+            }
         }
     });
     
