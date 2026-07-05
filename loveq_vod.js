@@ -1,488 +1,543 @@
-// by @木凡的天空
-const axios = require('axios');
-const cheerio = require('cheerio');
-const crypto = require('crypto');
+// LoveQ 音频源 - 适配 XPTV 应用
+// TVBox 格式转换为 XPTV 格式
 
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-
-let appConfig = {
-    ver: 20260705,
-    title: 'LoveQ',
+// ========== 应用配置 ==========
+const APP_CONFIG = {
+    ver: 1,
+    title: 'LoveQ音频',
     site: 'https://www.loveq.cn',
-    default_pic: 'https://raw.githubusercontent.com/zcl668/videos-bak/main/loveq2026.jpg',
-    dexian_pic: 'https://raw.githubusercontent.com/zcl668/videos-bak/main/loveq2026.jpg',
-    filter_categories: ['盛世乾坤', '一些事一些情', '一些事一些情精华剪辑'],
-    tabs: [],
+    api: 'csp_loveq',
+    defaultPic: 'https://raw.githubusercontent.com/zcl668/videos-bak/main/loveq2026.jpg',
+    dexianPic: 'https://raw.githubusercontent.com/zcl668/videos-bak/main/loveq2026.jpg'
 };
 
-// 缓存session headers
-const headers = {
-    'User-Agent': UA,
-    'Referer': appConfig.site + '/',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-    'Accept-Encoding': 'gzip, deflate, br',
-    'Connection': 'keep-alive',
-    'Upgrade-Insecure-Requests': '1'
-};
+// 需要过滤的分类
+const FILTER_CATEGORIES = ['盛世乾坤', '一些事一些情', '一些事一些情精华剪辑'];
 
-// ========== 通用请求方法 ==========
-async function fetchHtml(url, params = null) {
-    try {
-        const response = await axios.get(url, {
-            params: params,
-            headers: headers,
-            timeout: 15000,
-            responseType: 'text',
-        });
-        return response.data;
-    } catch (e) {
-        console.log(`请求失败: ${e.message}, URL: ${url}`);
-        return '';
-    }
+// User-Agent
+const UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/604.1.14 (KHTML, like Gecko)';
+
+// ========== 工具函数 ==========
+function getText(el) {
+    return el ? el.text().trim().replace(/\s+/g, ' ') : '';
 }
 
-async function postData(url, data = null) {
-    try {
-        const response = await axios.post(url, data, {
-            headers: headers,
-            timeout: 15000,
-            responseType: 'text',
-        });
-        return response.data;
-    } catch (e) {
-        console.log(`POST请求失败: ${e.message}`);
-        return '';
-    }
+function getCurrentYear() {
+    return new Date().getFullYear();
 }
 
-// ========== 首页分类 ==========
+// ========== 获取应用信息 ==========
+async function getLocalInfo() {
+    const appConfig = {
+        ver: 1,
+        name: 'LoveQ音频',
+        api: 'csp_loveq',
+    };
+    return jsonify(appConfig);
+}
+
+// ========== 获取配置 ==========
 async function getConfig() {
-    const html = await fetchHtml(appConfig.site + '/program.html');
-    if (!html) {
-        return jsonify({ class: [] });
-    }
+    let config = { ...APP_CONFIG };
+    config.tabs = await getCategories();
+    return jsonify(config);
+}
 
-    const $ = cheerio.load(html);
-    const categories = [];
-    const seen = new Set();
-
-    // 查找所有分类链接
-    $('a[href]').each((i, elem) => {
-        const href = $(elem).attr('href') || '';
-        const title = $(elem).text().trim();
-
-        // 匹配分类URL格式: program-cat{id}-p1.html
-        const catMatch = href.match(/program-cat(\d+)-p\d+\.html/);
-        if (catMatch && title && !appConfig.filter_categories.includes(title)) {
-            const catId = catMatch[1];
-            if (catId !== '0' && !seen.has(catId)) {
-                seen.add(catId);
-                categories.push({
-                    type_name: title,
-                    type_id: catId,
-                });
-            }
+// ========== 获取分类 ==========
+async function getCategories() {
+    const url = APP_CONFIG.site + '/program.html';
+    
+    const { data } = await $fetch.get(url, {
+        headers: {
+            'User-Agent': UA,
+            'Referer': APP_CONFIG.site + '/'
         }
     });
-
-    // 按ID排序
-    categories.sort((a, b) => parseInt(a.type_id) - parseInt(b.type_id));
-
-    // 添加筛选器
-    const currentYear = new Date().getFullYear();
-    const years = [{ n: '全部年份', v: '' }];
-    for (let y = currentYear; y > 2002; y--) {
-        years.push({ n: String(y), v: String(y) });
-    }
-
-    const months = [{ n: '全部月份', v: '' }];
-    for (let m = 1; m <= 12; m++) {
-        months.push({ n: `${m}月`, v: String(m) });
-    }
-
-    const filters = {};
-    for (const cat of categories) {
-        filters[cat.type_id] = [
-            { key: 'year', name: '年份', value: years },
-            { key: 'month', name: '月份', value: months },
-        ];
-    }
-
-    appConfig.tabs = categories;
     
-    return jsonify({
-        class: categories,
-        filters: filters,
-        ...appConfig,
-    });
-}
-
-async function getCards(ext) {
-    ext = argsify(ext);
-    let { id: tid = '1', page: pg = '1', year = '', month = '' } = ext;
-
-    const params = {
-        cat_id: tid,
-        page: pg,
-    };
-    if (year) params.year = year;
-    if (month) params.month = month;
-
-    const html = await fetchHtml(appConfig.site + '/program.html', params);
-    if (!html) {
-        return jsonify({ list: [], page: parseInt(pg), pagecount: 0, limit: 30, total: 0 });
-    }
-
-    const $ = cheerio.load(html);
-    const videos = [];
-
-    // 查找节目列表
-    $('a[href*="program_download"]').each((i, elem) => {
-        const href = $(elem).attr('href') || '';
-        const title = $(elem).text().trim();
-
-        if (!title || title.length < 2) return;
-
-        const vidMatch = href.match(/program_download-?(\d+)\.html/);
-        if (vidMatch) {
-            const vid = vidMatch[1];
-
-            // 查找可能的图片
-            let pic = appConfig.default_pic;
-            const imgTag = $(elem).find('img');
-            if (imgTag.length && imgTag.attr('src')) {
-                let imgSrc = imgTag.attr('src');
-                if (imgSrc.startsWith('http')) {
-                    pic = imgSrc;
-                } else {
-                    pic = new URL(imgSrc, appConfig.site).href;
+    if (!data) return [];
+    
+    const $ = createCheerio().load(data);
+    const categories = [];
+    const seen = new Set();
+    
+    $('a[href]').each(function() {
+        const href = $(this).attr('href') || '';
+        const title = getText($(this));
+        
+        if (!title || FILTER_CATEGORIES.includes(title)) return;
+        
+        const match = href.match(/program-cat(\d+)-p\d+\.html/);
+        if (match && match[1] && match[1] !== '0' && !seen.has(match[1])) {
+            seen.add(match[1]);
+            categories.push({
+                name: title,
+                ui: 1,
+                ext: {
+                    id: match[1]
                 }
-            }
-
-            // 获取备注信息（如日期）
-            let remark = '';
-            const parent = $(elem).closest('li');
-            if (parent.length) {
-                const dateSpan = parent.find('span[class*="date"], span[class*="time"]');
-                if (dateSpan.length) {
-                    remark = dateSpan.text().trim();
-                }
-            }
-
-            videos.push({
-                vod_id: vid,
-                vod_name: title,
-                vod_pic: pic,
-                vod_remarks: remark,
             });
         }
     });
+    
+    categories.sort((a, b) => parseInt(a.ext.id) - parseInt(b.ext.id));
+    
+    return categories;
+}
 
-    // 计算分页
+// ========== 获取卡片列表 ==========
+async function getCards(ext) {
+    ext = argsify(ext);
+    let cards = [];
+    let { page = 1, id, filters = {} } = ext;
+    
+    let params = {
+        cat_id: id,
+        page: page
+    };
+    
+    if (filters.year && filters.year !== '') {
+        params.year = filters.year;
+    }
+    if (filters.month && filters.month !== '') {
+        params.month = filters.month;
+    }
+    
+    let url = APP_CONFIG.site + '/program.html';
+    const queryString = Object.entries(params)
+        .filter(([_, v]) => v !== undefined && v !== null && v !== '')
+        .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+        .join('&');
+    if (queryString) {
+        url += '?' + queryString;
+    }
+    
+    const { data } = await $fetch.get(url, {
+        headers: {
+            'User-Agent': UA,
+            'Referer': APP_CONFIG.site + '/'
+        }
+    });
+    
+    if (!data) {
+        return jsonify({ list: [] });
+    }
+    
+    const $ = createCheerio().load(data);
+    const seen = new Set();
+    
+    $('a[href*="program_download"]').each(function() {
+        const href = $(this).attr('href') || '';
+        const title = getText($(this));
+        
+        if (!title || title.length < 2) return;
+        
+        const match = href.match(/program_download-?(\d+)\.html/);
+        if (!match || seen.has(match[1])) return;
+        
+        const vid = match[1];
+        seen.add(vid);
+        
+        let pic = APP_CONFIG.defaultPic;
+        const img = $(this).find('img');
+        if (img.length > 0) {
+            const src = img.attr('src') || '';
+            if (src) {
+                pic = src.startsWith('http') ? src : APP_CONFIG.site + src;
+            }
+        }
+        
+        let remark = '';
+        const parent = $(this).closest('li');
+        if (parent.length > 0) {
+            const dateSpan = parent.find('span[class*="date"], span[class*="time"]');
+            if (dateSpan.length > 0) {
+                remark = getText(dateSpan);
+            }
+        }
+        
+        cards.push({
+            vod_id: vid,
+            vod_name: title,
+            vod_pic: pic,
+            vod_remarks: remark,
+            ext: {
+                vid: vid
+            }
+        });
+    });
+    
     let pageCount = 1;
     const pagination = $('div[class*="page"], div[class*="pagination"]');
-    if (pagination.length) {
+    if (pagination.length > 0) {
         const pageLinks = pagination.find('a');
-        if (pageLinks.length) {
-            const lastPage = pageLinks.length >= 2 ? pageLinks.eq(-2) : pageLinks.eq(-1);
-            const pageText = lastPage.text().trim();
+        if (pageLinks.length > 0) {
+            const lastIdx = pageLinks.length - 1;
+            const lastPage = pageLinks.length >= 2 ? pageLinks.eq(pageLinks.length - 2) : pageLinks.eq(lastIdx);
+            const pageText = getText(lastPage);
             if (/^\d+$/.test(pageText)) {
                 pageCount = parseInt(pageText);
             } else {
-                pageLinks.each((i, link) => {
-                    const href = $(link).attr('href') || '';
-                    const pageMatch = href.match(/[?&]page=(\d+)/);
-                    if (pageMatch) {
-                        const pgNum = parseInt(pageMatch[1]);
-                        if (pgNum > pageCount) pageCount = pgNum;
+                pageLinks.each(function() {
+                    const href = $(this).attr('href') || '';
+                    const pm = href.match(/[?&]page=(\d+)/);
+                    if (pm) {
+                        const pn = parseInt(pm[1]);
+                        if (pn > pageCount) pageCount = pn;
                     }
                 });
             }
         }
     }
-
-    if (pageCount <= parseInt(pg) && videos.length > 0) {
-        pageCount = parseInt(pg) + 1;
+    
+    if (pageCount <= parseInt(page) && cards.length > 0) {
+        pageCount = parseInt(page) + 1;
     }
-
+    
+    const currentYear = getCurrentYear();
+    const years = [{ n: '全部年份', v: '' }];
+    for (let y = currentYear; y > 2002; y--) {
+        years.push({ n: String(y), v: String(y) });
+    }
+    
+    const months = [{ n: '全部月份', v: '' }];
+    for (let m = 1; m <= 12; m++) {
+        months.push({ n: m + '月', v: String(m) });
+    }
+    
     return jsonify({
-        list: videos,
-        page: parseInt(pg),
+        list: cards,
+        total: cards.length,
+        page: parseInt(page),
         pagecount: pageCount,
         limit: 30,
-        total: videos.length,
+        filter: [
+            {
+                key: 'year',
+                name: '年份',
+                init: '',
+                value: years
+            },
+            {
+                key: 'month',
+                name: '月份',
+                init: '',
+                value: months
+            }
+        ]
     });
 }
 
-// ========== 搜索 ==========
-async function search(ext) {
+// ========== 获取详情 - TVBox格式转XPTV ==========
+async function getDetail(ext) {
     ext = argsify(ext);
-    const key = encodeURIComponent(ext.text);
-    const pg = ext.page || '1';
-    const videos = [];
-
-    const searchUrls = [
-        `${appConfig.site}/so-${pg}-${key}.html`,
-        `${appConfig.site}/so.html?wd=${key}&page=${pg}`,
-        `${appConfig.site}/search.php?keyword=${key}&page=${pg}`,
-    ];
-
-    let html = '';
-    for (const url of searchUrls) {
-        html = await fetchHtml(url);
-        if (html) break;
-    }
-
-    if (!html) {
+    const vid = ext.vid || ext.id;
+    
+    if (!vid) {
         return jsonify({ list: [] });
     }
-
-    const $ = cheerio.load(html);
-    const seenIds = new Set();
-
-    $('a[href*="program_download"]').each((i, elem) => {
-        const href = $(elem).attr('href') || '';
-        const title = $(elem).text().trim();
-
-        if (!title || title.length < 2) return;
-
-        const vidMatch = href.match(/program_download-?(\d+)\.html/);
-        if (vidMatch) {
-            const vid = vidMatch[1];
-            const searchText = ext.text.toLowerCase();
-            if (title.toLowerCase().includes(searchText) || title.includes(ext.text)) {
-                if (!seenIds.has(vid)) {
-                    seenIds.add(vid);
-                    videos.push({
-                        vod_id: vid,
-                        vod_name: title,
-                        vod_pic: appConfig.default_pic,
-                        vod_remarks: '搜索结果',
-                    });
-                }
-            }
+    
+    const url = APP_CONFIG.site + `/program_download-${vid}.html`;
+    
+    const { data } = await $fetch.get(url, {
+        headers: {
+            'User-Agent': UA,
+            'Referer': APP_CONFIG.site + '/'
         }
     });
-
-    return jsonify({ list: videos });
-}
-
-// ========== 节目详情（获取音轨） ==========
-async function getTracks(ext) {
-    ext = argsify(ext);
-    const vid = ext.vod_id;
-    const url = `${appConfig.site}/program_download-${vid}.html`;
-    const html = await fetchHtml(url);
-
-    if (!html) {
+    
+    if (!data) {
         return jsonify({ list: [] });
     }
-
-    const $ = cheerio.load(html);
-
-    // 提取原标题
+    
+    const $ = createCheerio().load(data);
+    
+    // ========== 提取原标题 ==========
     let originalTitle = '';
     const titleTag = $('title');
-    if (titleTag.length) {
-        originalTitle = titleTag.text().trim();
-        originalTitle = originalTitle.replace(/[-|]\s*LoveQ.*$/, '').trim();
+    if (titleTag.length > 0) {
+        originalTitle = getText(titleTag).replace(/[-|]\s*LoveQ.*$/, '').trim();
     }
     if (!originalTitle) {
-        originalTitle = `节目${vid}`;
+        originalTitle = '节目' + vid;
     }
-
-    // 提取发布日期和内容
+    
+    // ========== 提取发布日期和内容 ==========
     let pubDate = '';
     let content = '';
-
+    
     const pdl1List = $('ul.pdl1');
-    if (pdl1List.length) {
-        pdl1List.find('li').each((i, li) => {
-            const liText = $(li).text().trim();
-            if (liText.includes('发布日期：') || liText.includes('发布时间：')) {
-                const dateMatch = liText.match(/(\d{4}[-/]\d{2}[-/]\d{2})/);
+    if (pdl1List.length > 0) {
+        pdl1List.find('li').each(function() {
+            const text = getText($(this));
+            
+            if (text.includes('发布日期') || text.includes('发布时间')) {
+                const dateMatch = text.match(/(\d{4}[-/]\d{2}[-/]\d{2})/);
                 if (dateMatch) {
                     pubDate = dateMatch[1];
                 } else {
-                    pubDate = liText.replace(/^(发布日期|发布时间)[：:]/, '').trim();
+                    pubDate = text.replace(/^(发布日期|发布时间)[：:]/, '').trim();
                 }
-            } else if (liText.includes('节目内容：') || liText.includes('内容简介：')) {
-                content = liText.replace(/^(节目内容|内容简介)[：:]/, '').trim();
+            } else if (text.includes('节目内容') || text.includes('内容简介')) {
+                content = text.replace(/^(节目内容|内容简介)[：:]/, '').trim();
             }
         });
     }
-
+    
     if (!content) {
         const metaDesc = $('meta[name="description"]');
-        if (metaDesc.length && metaDesc.attr('content')) {
-            content = metaDesc.attr('content');
+        if (metaDesc.length > 0) {
+            content = metaDesc.attr('content') || '';
         }
     }
-
+    
     if (!content) {
         const contentDiv = $('div[class*="content"], div[class*="intro"], div[class*="desc"]');
-        if (contentDiv.length) {
-            content = contentDiv.text().trim().slice(0, 500);
+        if (contentDiv.length > 0) {
+            content = getText(contentDiv).substring(0, 500);
         }
     }
-
+    
     if (content && /^\d{4}[-/]\d{2}[-/]\d{2}\s*$/.test(content)) {
         content = '暂无节目简介';
-    } else if (!content) {
+    }
+    if (!content) {
         content = '暂无节目简介';
     }
-
-    // 新标题格式：发布日期 + 节目内容
+    
+    // ========== 构建标题 ==========
     let newTitle;
     if (pubDate) {
         const formattedDate = pubDate.replace(/\//g, '-');
-        const contentPreview = content.length > 50 ? content.slice(0, 50) : content;
-        newTitle = `${formattedDate} - ${contentPreview}`;
+        const contentPreview = content.length > 50 ? content.substring(0, 50) : content;
+        newTitle = formattedDate + ' - ' + contentPreview;
     } else {
         newTitle = originalTitle;
     }
-
-    // 构建描述信息
-    const desc = pubDate ? `📅 发布日期：${pubDate}\n📝 ${content}` : content;
-
-    // 提取音频链接
+    
+    const desc = pubDate ? '📅 发布日期：' + pubDate + '\n📝 ' + content : content;
+    
+    // ========== 提取音频链接 ==========
     const audioLinks = [];
-    const seenLinks = new Set();
-
-    // 匹配完整格式的音频链接
-    const pattern = /https?:\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/gi;
-    let matches = html.match(pattern) || [];
-    audioLinks.push(...matches);
-
-    // 匹配协议相对路径
-    const patternRel = /\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/gi;
-    matches = html.match(patternRel) || [];
-    audioLinks.push(...matches);
-
-    // 从audio或source标签中提取
-    $('audio[src], source[src]').each((i, elem) => {
-        const src = $(elem).attr('src') || '';
-        if (src.includes('dl2.loveq.cn') && /\.mp3\?/.test(src) && src.includes('sign=') && src.includes('timestamp=')) {
-            audioLinks.push(src);
-        }
-    });
-
-    // 去重并完善链接
-    const validLinks = [];
-    for (let link of audioLinks) {
-        if (seenLinks.has(link)) continue;
-        seenLinks.add(link);
-        if (link.startsWith('//')) {
-            link = 'https:' + link;
-        }
-        validLinks.push(link);
-    }
-
-    // 构建音轨列表
-    const tracks = [];
-    if (validLinks.length > 0) {
-        validLinks.forEach((link, index) => {
-            tracks.push({
-                name: `音频 ${index + 1}`,
-                pan: '',
-                ext: {
-                    url: link,
-                },
-            });
-        });
-    } else {
-        tracks.push({
-            name: '暂无音频',
-            pan: '',
-            ext: {
-                url: '',
-            },
-        });
-    }
-
-    // 判断图片
-    let vodPic = appConfig.default_pic;
-    if (originalTitle.includes('得闲小叙') || originalTitle.includes('得闲')) {
-        vodPic = appConfig.dexian_pic;
-    } else {
-        const imgTag = $('img[class*="cover"], img[class*="poster"], img[class*="pic"]');
-        if (imgTag.length && imgTag.attr('src')) {
-            let imgSrc = imgTag.attr('src');
-            if (imgSrc.startsWith('http')) {
-                vodPic = imgSrc;
-            } else {
-                vodPic = new URL(imgSrc, appConfig.site).href;
+    const seen = new Set();
+    const htmlStr = data;
+    
+    // 匹配音频链接
+    const patterns = [
+        /https?:\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/gi,
+        /\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/gi,
+        /(?:https?:)?\/\/dl2\.loveq\.cn:8090\/[^\s<>"']+\.mp3[^\s<>"']*/gi
+    ];
+    
+    for (const pattern of patterns) {
+        let match;
+        while ((match = pattern.exec(htmlStr)) !== null) {
+            let link = match[0];
+            if (link.startsWith('//')) {
+                link = 'https:' + link;
+            }
+            if (link.includes('sign=') && link.includes('timestamp=') && !seen.has(link)) {
+                seen.add(link);
+                audioLinks.push(link);
             }
         }
     }
-
-    // 返回包含视频信息的结果，以便播放器使用
+    
+    // 从 audio/source 标签提取
+    $('audio[src], source[src]').each(function() {
+        const src = $(this).attr('src') || '';
+        if (src && src.includes('dl2.loveq.cn') && src.includes('.mp3')) {
+            let link = src.startsWith('//') ? 'https:' + src : src;
+            if (!seen.has(link)) {
+                seen.add(link);
+                audioLinks.push(link);
+            }
+        }
+    });
+    
+    // ========== 判断图片 ==========
+    let vodPic = APP_CONFIG.defaultPic;
+    if (originalTitle.includes('得闲小叙') || originalTitle.includes('得闲')) {
+        vodPic = APP_CONFIG.dexianPic;
+    } else {
+        const imgTag = $('img[class*="cover"], img[class*="poster"], img[class*="pic"]');
+        if (imgTag.length > 0) {
+            const src = imgTag.attr('src') || '';
+            if (src) {
+                vodPic = src.startsWith('http') ? src : APP_CONFIG.site + src;
+            }
+        }
+    }
+    
+    // ========== XPTV 格式：vod_play_url 使用 TVBox 格式 ==========
+    // XPTV 会调用 getPlayinfo 来解析播放地址
+    let playUrl = '';
+    
+    if (audioLinks.length > 0) {
+        // TVBox 格式: 播放源$播放地址
+        // XPTV 的 getPlayinfo 会接收这个格式并解析
+        playUrl = 'LoveQ音频$' + audioLinks[0];
+        
+        // 如果有多个音频，用 # 分隔
+        if (audioLinks.length > 1) {
+            const moreLinks = audioLinks.slice(1).map(link => 'LoveQ音频$' + link);
+            playUrl = playUrl + '#' + moreLinks.join('#');
+        }
+    }
+    
+    // ========== 返回结果 ==========
     return jsonify({
         list: [{
             vod_id: vid,
             vod_name: newTitle,
             vod_pic: vodPic,
             vod_content: desc,
-            vod_play_from: '木凡的天空',
-            vod_play_url: tracks.map(t => t.ext.url).join('$$$'),
-        }],
+            vod_play_from: 'LoveQ音频',
+            vod_play_url: playUrl,
+            ext: {
+                vid: vid,
+                audio_links: audioLinks
+            }
+        }]
     });
 }
 
-// ========== 播放器 ==========
+// ========== 获取播放信息 - 解析 TVBox 格式 ==========
 async function getPlayinfo(ext) {
     ext = argsify(ext);
-    let audioUrl = ext.url || '';
     
-    // 处理多个音频链接
-    if (audioUrl.includes('$$$')) {
-        const tracks = audioUrl.split('$$$');
-        // 默认取第一个
-        audioUrl = tracks[0] || '';
+    // 获取播放URL - 可能是 TVBox 格式
+    let rawUrl = ext.url || ext.id || '';
+    
+    // 如果为空，尝试从 ext.audio_links 获取
+    if (!rawUrl && ext.audio_links && ext.audio_links.length > 0) {
+        rawUrl = ext.audio_links[0];
     }
-
-    const playHeaders = {
-        'User-Agent': UA,
-        'Referer': appConfig.site + '/',
-        'Origin': appConfig.site,
-        'Accept': 'audio/webm,audio/ogg,audio/wav,audio/*;q=0.9,application/ogg;q=0.7,video/*;q=0.6,*/*;q=0.5',
-        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-        'Range': 'bytes=0-',
-        'Connection': 'keep-alive',
-    };
-
-    // 如果是音频文件，直接播放
-    const audioExtensions = ['.mp3', '.m4a', '.wav', '.wma', '.ogg', '.aac', '.flac'];
-    const isAudio = audioExtensions.some(ext => audioUrl.toLowerCase().includes(ext));
-
-    if (isAudio && audioUrl) {
+    
+    // 解析 TVBox 格式: 播放源$播放地址
+    let audioUrl = rawUrl;
+    
+    // 如果包含 $，提取播放地址部分
+    if (rawUrl && rawUrl.includes('$')) {
+        // 如果有 # 分隔符，取第一个
+        if (rawUrl.includes('#')) {
+            const firstPart = rawUrl.split('#')[0];
+            if (firstPart.includes('$')) {
+                audioUrl = firstPart.split('$')[1];
+            }
+        } else {
+            audioUrl = rawUrl.split('$')[1];
+        }
+    }
+    
+    // 如果还是没有，尝试从 ext.audio_links 获取第一个
+    if (!audioUrl || audioUrl === '' || audioUrl === rawUrl) {
+        if (ext.audio_links && ext.audio_links.length > 0) {
+            audioUrl = ext.audio_links[0];
+        }
+    }
+    
+    // 确保URL完整
+    if (audioUrl && audioUrl.startsWith('//')) {
+        audioUrl = 'https:' + audioUrl;
+    }
+    
+    // 如果还是没有播放地址，返回空
+    if (!audioUrl || audioUrl === '' || audioUrl === 'LoveQ音频$') {
         return jsonify({
-            urls: [audioUrl],
-            headers: [playHeaders],
+            urls: [],
+            headers: []
         });
     }
-
+    
+    // XPTV 标准格式
     return jsonify({
-        urls: [],
-        headers: [],
+        urls: [audioUrl],
+        headers: [{
+            'User-Agent': UA,
+            'Referer': APP_CONFIG.site + '/',
+            'Origin': APP_CONFIG.site,
+            'Accept': 'audio/webm,audio/ogg,audio/wav,audio/*;q=0.9,application/ogg;q=0.7,video/*;q=0.6,*/*;q=0.5',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'Range': 'bytes=0-',
+            'Connection': 'keep-alive'
+        }]
     });
 }
 
-// ========== 辅助函数 ==========
-function jsonify(obj) {
-    return obj;
+// ========== 搜索 ==========
+async function search(ext) {
+    ext = argsify(ext);
+    let cards = [];
+    let text = encodeURIComponent(ext.text);
+    let page = ext.page || 1;
+    
+    const searchUrls = [
+        APP_CONFIG.site + `/so-${page}-${text}.html`,
+        APP_CONFIG.site + `/so.html?wd=${text}&page=${page}`,
+        APP_CONFIG.site + `/search.php?keyword=${text}&page=${page}`
+    ];
+    
+    let data = '';
+    
+    for (const url of searchUrls) {
+        try {
+            const response = await $fetch.get(url, {
+                headers: {
+                    'User-Agent': UA,
+                    'Referer': APP_CONFIG.site + '/'
+                }
+            });
+            if (response.data) {
+                data = response.data;
+                break;
+            }
+        } catch (e) {
+            // 继续尝试下一个
+        }
+    }
+    
+    if (!data) {
+        return jsonify({ list: [] });
+    }
+    
+    const $ = createCheerio().load(data);
+    const seen = new Set();
+    
+    $('a[href*="program_download"]').each(function() {
+        const href = $(this).attr('href') || '';
+        const title = getText($(this));
+        
+        if (!title || title.length < 2) return;
+        
+        const match = href.match(/program_download-?(\d+)\.html/);
+        if (!match || seen.has(match[1])) return;
+        
+        const vid = match[1];
+        const searchKey = ext.text.toLowerCase();
+        
+        if (title.toLowerCase().includes(searchKey) || title.includes(ext.text)) {
+            seen.add(vid);
+            cards.push({
+                vod_id: vid,
+                vod_name: title,
+                vod_pic: APP_CONFIG.defaultPic,
+                vod_remarks: '搜索结果'
+            });
+        }
+    });
+    
+    return jsonify({
+        list: cards,
+        total: cards.length
+    });
 }
 
-function argsify(obj) {
-    return obj || {};
-}
-
-// 导出函数
+// ========== 导出模块 ==========
 module.exports = {
+    getLocalInfo,
     getConfig,
     getCards,
-    getTracks,
+    getDetail,
     getPlayinfo,
-    search,
+    search
 };
