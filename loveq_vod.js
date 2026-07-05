@@ -52,10 +52,10 @@ async function getConfig() {
         
         tabs.sort((a, b) => parseInt(a.ext.id) - parseInt(b.ext.id));
         
-        // 添加搜索 tab
+        // 添加搜索和收藏 tab
         tabs.unshift({
             name: '🔍 搜索',
-            ui: 2,
+            ui: 2,  // 搜索类型
             ext: { type: 'search' }
         });
         
@@ -70,6 +70,7 @@ async function getCards(ext) {
     let cards = [];
     let { page = 1, id, type, filters = {} } = ext;
     
+    // 如果是搜索
     if (type === 'search') {
         return jsonify({ list: [] });
     }
@@ -99,6 +100,7 @@ async function getCards(ext) {
         if (vidMatch) {
             const vid = vidMatch[1];
             
+            // 查找图片
             let pic = appConfig.default_pic;
             const img = $(el).find('img');
             if (img.length && img.attr('src')) {
@@ -110,6 +112,7 @@ async function getCards(ext) {
                 }
             }
             
+            // 获取备注（日期）
             let remark = '';
             const parent = $(el).closest('li');
             if (parent.length) {
@@ -132,6 +135,7 @@ async function getCards(ext) {
         }
     });
     
+    // 计算分页
     let pageCount = 1;
     const pagination = $('div[class*="page"], div[class*="pagination"]');
     if (pagination.length) {
@@ -204,6 +208,7 @@ async function getTracks(ext) {
     
     const $ = cheerio.load(html);
     
+    // 提取标题和内容
     let originalTitle = '';
     const titleTag = $('title');
     if (titleTag.length) {
@@ -212,6 +217,7 @@ async function getTracks(ext) {
     }
     if (!originalTitle) originalTitle = `节目${vid}`;
     
+    // 提取发布日期和内容
     let pubDate = '';
     let content = '';
     
@@ -252,6 +258,7 @@ async function getTracks(ext) {
         content = "暂无节目简介";
     }
     
+    // 构建新标题
     let newTitle = originalTitle;
     if (pubDate) {
         const formattedDate = pubDate.replace(/\//g, '-');
@@ -261,7 +268,7 @@ async function getTracks(ext) {
     
     const desc = pubDate ? `📅 发布日期：${pubDate}\n📝 ${content}` : content;
     
-    // 线路12：提取音频链接
+    // 提取音频链接
     const audioLinks = [];
     const pattern = /https?:\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/gi;
     let match;
@@ -269,11 +276,13 @@ async function getTracks(ext) {
         audioLinks.push(match[0]);
     }
     
+    // 协议相对路径
     const patternRel = /\/\/dl2\.loveq\.cn:8090\/live\/program\/\d+\/\d+\.mp3\?sign=[a-f0-9]+&timestamp=\d+/gi;
     while ((match = patternRel.exec(html)) !== null) {
         audioLinks.push('https:' + match[0]);
     }
     
+    // 从 audio/source 标签提取
     $('audio, source').each((_, tag) => {
         const src = $(tag).attr('src');
         if (src && src.includes('dl2.loveq.cn') && /\.mp3\?/.test(src) && src.includes('sign=') && src.includes('timestamp=')) {
@@ -281,17 +290,20 @@ async function getTracks(ext) {
         }
     });
     
+    // 去重
     const validLinks = [...new Set(audioLinks)];
     
+    // 构建播放 URL
     let playUrl = "暂无音频";
     if (validLinks.length > 0) {
         if (validLinks.length > 1) {
-            playUrl = validLinks.map((link, i) => `线路12$${link}`).join('$$$');
+            playUrl = validLinks.map((link, i) => `LoveQ音频$${link}`).join('$$$');
         } else {
-            playUrl = `线路12$${validLinks[0]}`;
+            playUrl = `LoveQ音频$${validLinks[0]}`;
         }
     }
     
+    // 判断是否为得闲小叙
     let vodPic = appConfig.default_pic;
     if (originalTitle.includes("得闲小叙") || originalTitle.includes("得闲")) {
         vodPic = appConfig.dexian_pic;
@@ -313,7 +325,7 @@ async function getTracks(ext) {
             pic: vodPic,
             desc: desc,
             tracks: [{
-                name: '线路12',
+                name: '默认分组',
                 tracks: validLinks.map((link, idx) => ({
                     name: `音频 ${idx + 1}`,
                     pan: '',
@@ -395,6 +407,7 @@ async function search(ext) {
     return jsonify({ list: cards });
 }
 
+// 辅助函数
 async function get(url) {
     try {
         const response = await $fetch.get(url, {
