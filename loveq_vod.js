@@ -11,7 +11,6 @@ async function getLocalInfo() {
 }
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-const cheerio = createCheerio()
 
 // 配置参数
 let $config = argsify($config_str)
@@ -27,6 +26,32 @@ const appConfig = {
     tabs: [],
 }
 
+// ========== 封装请求函数 ==========
+async function request(url, options = {}) {
+    const defaultOptions = {
+        headers: {
+            'User-Agent': UA,
+            'Referer': appConfig.site + '/',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'Connection': 'keep-alive',
+        },
+        timeout: 15000,
+    }
+    
+    const finalOptions = { ...defaultOptions, ...options }
+    finalOptions.headers = { ...defaultOptions.headers, ...(options.headers || {}) }
+    
+    try {
+        const response = await fetch(url, finalOptions)
+        const text = await response.text()
+        return { data: text }
+    } catch (e) {
+        console.log('请求失败:', url, e.message)
+        return { data: '' }
+    }
+}
+
 // ========== 获取配置（动态获取分类） ==========
 async function getConfig() {
     let config = { ...appConfig };
@@ -34,14 +59,13 @@ async function getConfig() {
     // 从网站动态获取分类
     try {
         const url = `${appConfig.site}/program.html`
-        const { data } = await $fetch.get(url, {
-            headers: {
-                'User-Agent': UA,
-                'Referer': appConfig.site + '/',
-            },
-        })
+        const { data } = await request(url)
         
-        const $ = cheerio.load(data)
+        if (!data) {
+            throw new Error('无法获取页面数据')
+        }
+        
+        const $ = createCheerio().load(data)
         let categories = []
         let seen = new Set()
         
@@ -82,12 +106,20 @@ async function getConfig() {
                         cat_id: '1',
                     },
                 },
+                {
+                    name: '得闲小叙',
+                    ui: 1,
+                    ext: {
+                        cat_id: '2',
+                    },
+                },
             ]
         }
         
         config.tabs = categories
         
     } catch (e) {
+        console.log('获取分类失败:', e.message)
         // 如果动态获取失败，使用默认分类
         config.tabs = [
             {
@@ -95,6 +127,13 @@ async function getConfig() {
                 ui: 1,
                 ext: {
                     cat_id: '1',
+                },
+            },
+            {
+                name: '得闲小叙',
+                ui: 1,
+                ext: {
+                    cat_id: '2',
                 },
             },
         ]
@@ -109,7 +148,7 @@ async function getCards(ext) {
     let cards = []
     let { page = 1, cat_id = '1', filters = {} } = ext
 
-    // 构建请求参数 - 使用Python代码中的方式
+    // 构建请求参数
     let params = new URLSearchParams()
     params.append('cat_id', cat_id)
     params.append('page', page)
@@ -125,16 +164,21 @@ async function getCards(ext) {
     
     console.log('Requesting URL:', url)
 
-    const { data } = await $fetch.get(url, {
-        headers: {
-            'User-Agent': UA,
-            'Referer': appConfig.site + '/',
-        },
-    })
-
-    const $ = cheerio.load(data)
+    const { data } = await request(url)
     
-    // 查找节目列表 - 匹配所有包含program_download的链接
+    if (!data) {
+        return jsonify({
+            list: [],
+            page: parseInt(page),
+            pagecount: 1,
+            total: 0,
+            filter: [],
+        })
+    }
+
+    const $ = createCheerio().load(data)
+    
+    // 查找节目列表
     $('a[href*="program_download"]').each((_, a) => {
         const href = $(a).attr('href')
         const title = $(a).text().trim()
@@ -150,11 +194,10 @@ async function getCards(ext) {
         }
         const vid = vidMatch[1]
 
-        // 查找图片 - 查找当前a标签内的img或者父级内的img
+        // 查找图片
         let pic = appConfig.default_pic
         let imgTag = $(a).find('img')
         if (imgTag.length === 0) {
-            // 尝试在父级中查找
             const parent = $(a).closest('li, div[class*="item"], div[class*="entry"]')
             if (parent.length > 0) {
                 imgTag = parent.find('img')
@@ -169,12 +212,16 @@ async function getCards(ext) {
                 } else if (imgSrc.startsWith('/')) {
                     pic = appConfig.site + imgSrc
                 } else {
-                    pic = new URL(imgSrc, appConfig.site).href
+                    try {
+                        pic = new URL(imgSrc, appConfig.site).href
+                    } catch (e) {
+                        pic = appConfig.default_pic
+                    }
                 }
             }
         }
 
-        // 获取备注信息（如日期）
+        // 获取备注信息
         let remark = ''
         const parent = $(a).closest('li') || $(a).closest('div[class*="item"], div[class*="entry"]')
         if (parent.length > 0) {
@@ -202,7 +249,6 @@ async function getCards(ext) {
     if (pagination.length > 0) {
         const pageLinks = pagination.find('a')
         if (pageLinks.length > 0) {
-            // 查找最后一页
             let maxPage = 1
             pageLinks.each((_, link) => {
                 const href = $(link).attr('href')
@@ -276,14 +322,13 @@ async function getTracks(ext) {
     
     let url = `${appConfig.site}/program_download-${vid}.html`
 
-    const { data } = await $fetch.get(url, {
-        headers: {
-            'User-Agent': UA,
-            'Referer': appConfig.site + '/',
-        },
-    })
+    const { data } = await request(url)
+    
+    if (!data) {
+        return jsonify({ list: [], tracks: [] })
+    }
 
-    const $ = cheerio.load(data)
+    const $ = createCheerio().load(data)
 
     // 提取原标题
     let originalTitle = ''
@@ -299,7 +344,6 @@ async function getTracks(ext) {
     let pubDate = ''
     let content = ''
 
-    // 查找ul.pdl1中的信息
     const pdl1List = $('ul.pdl1')
     if (pdl1List.length > 0) {
         pdl1List.find('li').each((_, li) => {
@@ -338,7 +382,7 @@ async function getTracks(ext) {
         content = '暂无节目简介'
     }
 
-    // 构建新标题：发布日期 + 节目内容
+    // 构建新标题
     let newTitle = originalTitle
     if (pubDate) {
         const formattedDate = pubDate.replace('/', '-')
@@ -402,7 +446,6 @@ async function getTracks(ext) {
                 }
             })
         })
-        // 添加自动选项（第一个）
         tracks.unshift({
             name: '自动',
             pan: '',
@@ -423,7 +466,11 @@ async function getTracks(ext) {
             if (imgSrc.startsWith('http')) {
                 vodPic = imgSrc
             } else {
-                vodPic = new URL(imgSrc, appConfig.site).href
+                try {
+                    vodPic = new URL(imgSrc, appConfig.site).href
+                } catch (e) {
+                    vodPic = appConfig.default_pic
+                }
             }
         }
     }
@@ -498,12 +545,7 @@ async function search(ext) {
     let data = ''
     for (let url of searchUrls) {
         try {
-            const result = await $fetch.get(url, {
-                headers: {
-                    'User-Agent': UA,
-                    'Referer': appConfig.site + '/',
-                },
-            })
+            const result = await request(url)
             if (result.data) {
                 data = result.data
                 break
@@ -517,7 +559,7 @@ async function search(ext) {
         return jsonify({ list: [] })
     }
 
-    const $ = cheerio.load(data)
+    const $ = createCheerio().load(data)
     let seenIds = new Set()
 
     $('a[href*="program_download"]').each((_, a) => {
