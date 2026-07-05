@@ -75,14 +75,15 @@ async function getCards(ext) {
         return jsonify({ list: [] });
     }
     
-    const params = new URLSearchParams();
-    params.append('cat_id', id);
-    params.append('page', page);
+    // 使用数组构建 URL 参数，替代 URLSearchParams
+    let params = [];
+    params.push(`cat_id=${id}`);
+    params.push(`page=${page}`);
     
-    if (filters.year) params.append('year', filters.year);
-    if (filters.month) params.append('month', filters.month);
+    if (filters.year) params.push(`year=${filters.year}`);
+    if (filters.month) params.push(`month=${filters.month}`);
     
-    const url = `${appConfig.site}/program.html?${params.toString()}`;
+    const url = `${appConfig.site}/program.html?${params.join('&')}`;
     console.log('Requesting:', url);
     
     const html = await get(url);
