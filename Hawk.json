@@ -10,17 +10,17 @@
     "update_time": "2025-11-12T10:45:00Z",
     "endpoint": "https://dev.9228.eu/js/xiaowo4.js"
   },
-  {
-    "id": "xiaoqiu",
-    "name": "小秋音乐",
-    "desc": "Music",
-    "type": "music-free",
-    "icon": "https://cdn.9228.eu/music2.png",
-    "author": "purkylin",
-    "version": "0.0.2",
-    "update_time": "2025-11-12T10:45:00Z",
-    "endpoint": "https://dev.9228.eu/js/xiaoqiu.js"
-  },
+  {{
+		"id": "xiaoqiu",
+		"name": "小秋音乐",
+		"desc": "Music",
+		"type": "music-free",
+		"icon": "https://cdn.9228.eu/music.png",
+		"author": "purkylin",
+		"version": "0.0.2",
+		"update_time": "2025-11-12T10:45:00Z",
+		"endpoint": "https://dev.9228.eu/js/xiaoqiu.js"
+	},
   {
     "id": "xiaoyun",
     "name": "小芸音乐",
