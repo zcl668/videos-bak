@@ -1,16 +1,5 @@
 [
     {
-    "id": "loveq",
-    "name": "一些事一些情",
-    "desc": "Music",
-    "type": "music-free",
-    "icon": "https://cdn.9228.eu/music2.png",
-    "author": "anru",
-    "version": "0.0.2",
-    "update_time": "20256-04-21T10:45:00Z",
-    "endpoint": "https://raw.githubusercontent.com/zcl668/videos-bak/main/loveq_vod.js"
-  },
-  {
     "id": "xiaowo",
     "name": "小蜗音乐",
     "desc": "Music",
