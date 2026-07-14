@@ -19,8 +19,16 @@ const playHeaders = {
 const defaultPic = 'https://raw.githubusercontent.com/zcl668/videos-bak/main/loveq2026.jpg';
 const dexianPic = 'https://raw.githubusercontent.com/zcl668/videos-bak/main/loveq2026.jpg';
 
-// 需要过滤的分类
-const filterCategories = ['盛世乾坤', '一些事一些情', '一些事一些情精华剪辑'];
+// ========== 只保留这些分类（不包含全部节目/精选） ==========
+const allowedCategories = {
+    '1': '粤语节目',
+    '4': '得闲小叙',
+    '5': '每周一车',
+    '35': 'Hugo的Story Time',
+    '3': '节目精华',
+    '38': '节目版头',
+    '2': '国语节目'
+};
 
 // ========== 工具函数 ==========
 
@@ -35,22 +43,15 @@ function fixUrl(path) {
     return host + '/' + path;
 }
 
-// 提取单个正则匹配组
-function matchOne(str, regex, group = 1) {
-    const m = str.match(regex);
-    return m ? m[group].trim() : '';
-}
-
 // 清理标签，只留文本
 function stripTags(str) {
     return str.replace(/<[^>]+>/g, '').trim();
 }
 
-// ========== 分类解析 ==========
+// ========== 分类解析（只保留允许的分类，过滤掉cat0） ==========
 
 function parseCategories(html) {
     const categories = [];
-    const seen = new Set();
     
     const links = pdfa(html, 'a[href]');
     links.forEach(a => {
@@ -58,18 +59,19 @@ function parseCategories(html) {
         const title = stripTags(a);
         
         const catMatch = href.match(/program-cat(\d+)-p\d+\.html/);
-        if (catMatch && title && !filterCategories.includes(title)) {
+        if (catMatch) {
             const catId = catMatch[1];
-            if (catId !== '0' && !seen.has(catId)) {
-                seen.add(catId);
+            // 过滤掉 cat0（全部节目/精选），只保留允许的分类
+            if (catId !== '0' && allowedCategories.hasOwnProperty(catId)) {
                 categories.push({
                     type_id: catId,
-                    type_name: title
+                    type_name: allowedCategories[catId]
                 });
             }
         }
     });
     
+    // 按ID排序
     categories.sort((a, b) => parseInt(a.type_id) - parseInt(b.type_id));
     return categories;
 }
